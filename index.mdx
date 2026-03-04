@@ -1,97 +1,255 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: GAC - Granular Access Control for PHP
+description: A flexible PHP library for managing granular access control with role-based permissions and restrictions in backend applications
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden dark:bg-[#0f1117] bg-white py-16 sm:py-20">
+  <div className="absolute inset-0 dark:bg-gradient-to-br dark:from-[#1E40AF]/10 dark:via-transparent dark:to-[#3B82F6]/5 bg-gradient-to-br from-[#60A5FA]/5 via-transparent to-[#3B82F6]/10" />
+  
+  <div className="relative max-w-6xl mx-auto px-6 sm:px-8">
+    <div className="text-center">
+      <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold dark:text-white text-gray-900 mb-6">
+        Granular Access Control for PHP
+      </h1>
+      <p className="text-lg sm:text-xl dark:text-gray-300 text-gray-600 max-w-3xl mx-auto mb-8">
+        Build secure backend applications with flexible role-based permissions, fine-grained access control, and customizable restrictions for users and API clients.
+      </p>
+      
+      <div className="flex flex-wrap items-center justify-center gap-4">
+        <a
+          href="/quickstart"
+          className="inline-flex items-center px-6 py-3 rounded-lg bg-[#3B82F6] hover:bg-[#1E40AF] text-white font-semibold transition-colors no-underline"
+        >
+          Get Started
+          <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+          </svg>
+        </a>
+        <a
+          href="/api/gac"
+          className="inline-flex items-center px-6 py-3 rounded-lg border dark:border-white/30 dark:bg-white/10 dark:hover:bg-white/20 border-gray-300 bg-white hover:bg-gray-50 dark:text-white text-gray-900 font-semibold transition-colors no-underline"
+        >
+          API Reference
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-bold dark:text-white text-gray-900 mb-3">
+    Key features
+  </h2>
+  <p className="text-base dark:text-gray-400 text-gray-600 mb-8">
+    Everything you need to implement enterprise-grade access control in your PHP applications.
+  </p>
+  
+  <CardGroup cols={3}>
+    <Card title="Role-based permissions" icon="user-shield" href="/concepts/permissions">
+      Assign permissions to users and clients through roles with priority-based inheritance
+    </Card>
+    <Card title="Granular control" icon="sliders" href="/concepts/permissions">
+      Control access at the module or category level with CRUD feature flags
+    </Card>
+    <Card title="Flexible restrictions" icon="calendar-clock" href="/concepts/restrictions">
+      Apply date-based, entity-based, or custom restrictions to limit access dynamically
+    </Card>
+    <Card title="Built-in caching" icon="bolt" href="/concepts/caching">
+      Optimize performance with automatic permission caching and selective cache purging
+    </Card>
+    <Card title="Custom adapters" icon="plug" href="/guides/custom-adapters">
+      Use your own database and cache implementations via simple interfaces
+    </Card>
+    <Card title="API client support" icon="key" href="/concepts/roles-entities">
+      Manage permissions for both users and API clients with the same flexible system
+    </Card>
+  </CardGroup>
+</div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-bold dark:text-white text-gray-900 mb-3">
+    Quick start
+  </h2>
+  <p className="text-base dark:text-gray-400 text-gray-600 mb-8">
+    Get GAC up and running in your PHP application in minutes.
+  </p>
+  
+  <Steps>
+    <Step title="Install via Composer">
+      Install the GAC package using Composer:
+      
+      ```bash
+      composer require dancasdev/gac
+      ```
+    </Step>
+    
+    <Step title="Set up the database">
+      Import the provided database schema to create the required tables:
+      
+      ```bash
+      mysql -u your_user -p your_database < vendor/dancasdev/gac/tables.sql
+      ```
+      
+      <Info>
+        The schema includes tables for users, roles, modules, permissions, and restrictions. You can customize the `gac_user` and `glb_person` tables to fit your application's needs.
+      </Info>
+    </Step>
+    
+    <Step title="Initialize GAC">
+      Create a GAC instance with your database connection:
+      
+      ```php
+      use DancasDev\GAC\GAC;
 
-## Make it yours
+      $gac = new GAC();
+      $gac->setDatabase([
+          'host' => 'localhost',
+          'dbname' => 'your_database',
+          'username' => 'your_user',
+          'password' => 'your_password'
+      ]);
+      
+      // Optional: Enable caching
+      $gac->setCache('gac', 1800, '/path/to/cache/dir');
+      ```
+    </Step>
+    
+    <Step title="Check permissions">
+      Set the current entity and check their permissions:
+      
+      ```php
+      // Set the user (entity type: 'user', ID: 123)
+      $gac->setEntity('user', 123);
 
-Design a docs site that looks great and empowers your users.
+      // Get permissions
+      $permissions = $gac->getPermissions();
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+      // Check if user has access to a module
+      if ($permissions->has('users')) {
+          $permission = $permissions->get('users');
+          
+          // Check specific features
+          if ($permission->hasFeature(['create', 'update'])) {
+              echo "User can create and update users";
+          }
+      }
+      ```
+      
+      <Tip>
+        Permissions are automatically cached on first retrieval. Subsequent requests will use the cached data for better performance.
+      </Tip>
+    </Step>
+  </Steps>
+</div>
 
-## Create beautiful pages
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-bold dark:text-white text-gray-900 mb-3">
+    Explore by topic
+  </h2>
+  <p className="text-base dark:text-gray-400 text-gray-600 mb-8">
+    Dive deeper into GAC's capabilities and learn how to customize it for your needs.
+  </p>
+  
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <a
+      href="/concepts/permissions"
+      className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 dark:hover:border-[#3B82F6] hover:border-[#3B82F6] overflow-hidden transition-colors no-underline dark:bg-[#1a1d27] bg-gray-50"
+    >
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-white text-gray-900 mb-2">
+          Understanding permissions
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-3">
+          Learn how GAC manages module access, feature-level permissions, and role-based inheritance.
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-300 text-gray-700 dark:group-hover:text-[#3B82F6] group-hover:text-[#3B82F6] transition-colors">
+          Read more
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a
+      href="/concepts/restrictions"
+      className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 dark:hover:border-[#3B82F6] hover:border-[#3B82F6] overflow-hidden transition-colors no-underline dark:bg-[#1a1d27] bg-gray-50"
+    >
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-white text-gray-900 mb-2">
+          Working with restrictions
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-3">
+          Apply time-based, entity-based, or custom restrictions to control when and where users can access resources.
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-300 text-gray-700 dark:group-hover:text-[#3B82F6] group-hover:text-[#3B82F6] transition-colors">
+          Read more
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a
+      href="/guides/setup-database"
+      className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 dark:hover:border-[#3B82F6] hover:border-[#3B82F6] overflow-hidden transition-colors no-underline dark:bg-[#1a1d27] bg-gray-50"
+    >
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-white text-gray-900 mb-2">
+          Database setup guide
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-3">
+          Detailed walkthrough of the database schema, relationships, and how to customize tables for your application.
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-300 text-gray-700 dark:group-hover:text-[#3B82F6] group-hover:text-[#3B82F6] transition-colors">
+          Read more
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+    
+    <a
+      href="/guides/custom-adapters"
+      className="group block rounded-2xl border dark:border-[#27272a] border-gray-200 dark:hover:border-[#3B82F6] hover:border-[#3B82F6] overflow-hidden transition-colors no-underline dark:bg-[#1a1d27] bg-gray-50"
+    >
+      <div className="p-6">
+        <h3 className="text-base font-semibold dark:text-white text-gray-900 mb-2">
+          Build custom adapters
+        </h3>
+        <p className="text-sm dark:text-gray-400 text-gray-600 mb-3">
+          Integrate GAC with your existing database layer and caching infrastructure using custom adapters.
+        </p>
+        <div className="flex items-center text-sm font-medium dark:text-gray-300 text-gray-700 dark:group-hover:text-[#3B82F6] group-hover:text-[#3B82F6] transition-colors">
+          Read more
+          <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
+    </a>
+  </div>
+</div>
 
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl border dark:border-[#27272a] border-gray-200 dark:bg-[#1a1d27] bg-gray-50 p-8 sm:p-10 text-center">
+    <h2 className="text-2xl sm:text-3xl font-bold dark:text-white text-gray-900 mb-4">
+      Ready to secure your application?
+    </h2>
+    <p className="text-base dark:text-gray-400 text-gray-600 max-w-2xl mx-auto mb-6">
+      Install GAC and start implementing enterprise-grade access control in your PHP backend today.
+    </p>
+    <a
+      href="/installation"
+      className="inline-flex items-center px-6 py-3 rounded-lg bg-[#3B82F6] hover:bg-[#1E40AF] text-white font-semibold transition-colors no-underline"
+    >
+      Get Started
+      <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+      </svg>
+    </a>
+  </div>
+</div>

@@ -1,0 +1,514 @@
+---
+title: 'ByEntity'
+description: 'Entity-based restrictions for access control'
+---
+
+## Overview
+
+The `ByEntity` class provides entity-based restriction methods to control access based on specific entity identifiers. It supports both allowlist (permit only specific entities) and denylist (block specific entities) patterns.
+
+## Class Reference
+
+<ParamField path="ByEntity" type="class">
+  Extends `Restriction` class to provide entity-specific access control methods.
+</ParamField>
+
+### Available Methods
+
+The class maps method names to their implementations:
+
+```php
+protected array $methods = [
+    'allow' => 'allow',
+    'deny' => 'deny',
+];
+```
+
+---
+
+## allow()
+
+Allow access only to specific entities (allowlist pattern).
+
+<ParamField path="internalData" type="array" required>
+  Internal restriction data structure
+  
+  <Expandable title="properties">
+    <ParamField path="l" type="array" required>
+      List of allowed entity identifiers. Can contain strings or integers.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="externalData" type="array" required>
+  External validation data
+  
+  <Expandable title="properties">
+    <ParamField path="entity" type="string|integer" required>
+      Entity identifier to validate against the allowlist
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if the entity is in the allowed list, `false` otherwise
+</ResponseField>
+
+### Method Signature
+
+```php
+public function allow(array $internalData, array $externalData) : bool
+```
+
+### Internal Data Structure Example
+
+```php
+// String identifiers
+$internalData = [
+    'l' => ['user_123', 'user_456', 'admin_001']
+];
+
+// Integer identifiers
+$internalData = [
+    'l' => [1, 5, 10, 42]
+];
+
+// Mixed identifiers
+$internalData = [
+    'l' => ['admin', 1, 'moderator', 999]
+];
+```
+
+### External Data Structure Example
+
+```php
+// String entity
+$externalData = [
+    'entity' => 'user_123'
+];
+
+// Integer entity
+$externalData = [
+    'entity' => 42
+];
+```
+
+### Validation Logic
+
+- Validates that `internalData['l']` is an array
+- Validates that `externalData['entity']` is a string or integer
+- Checks: `in_array($externalData['entity'], $internalData['l'])`
+- Returns `false` if entity is not found in the allowed list
+
+### Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByEntity;
+
+// Allow access only to premium users
+$restrictions = [
+    'allow' => [
+        ['d' => [
+            'l' => ['premium_user_1', 'premium_user_2', 'vip_user_1']
+        ]]
+    ]
+];
+
+$byEntity = new ByEntity($restrictions);
+
+// Check if user has access
+$externalData = ['entity' => 'premium_user_1'];
+$isAllowed = $byEntity->run($externalData);
+
+if ($isAllowed) {
+    // Access granted - entity is in allowlist
+}
+
+// Check unauthorized user
+$externalData = ['entity' => 'regular_user'];
+$isAllowed = $byEntity->run($externalData);
+
+if (!$isAllowed) {
+    $error = $byEntity->getError();
+    // Access denied - entity not in allowlist
+    // $error['method'] === 'allow'
+    // $error['restriction'] contains the restriction data
+}
+```
+
+---
+
+## deny()
+
+Deny access to specific entities (denylist/blocklist pattern).
+
+<ParamField path="internalData" type="array" required>
+  Internal restriction data structure
+  
+  <Expandable title="properties">
+    <ParamField path="l" type="array" required>
+      List of denied/blocked entity identifiers. Can contain strings or integers.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="externalData" type="array" required>
+  External validation data
+  
+  <Expandable title="properties">
+    <ParamField path="entity" type="string|integer" required>
+      Entity identifier to validate against the denylist
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if the entity is NOT in the denied list, `false` if it is denied
+</ResponseField>
+
+### Method Signature
+
+```php
+public function deny(array $internalData, array $externalData) : bool
+```
+
+### Internal Data Structure Example
+
+```php
+// Block specific users
+$internalData = [
+    'l' => ['banned_user_1', 'suspended_user_2', 'blocked_user_3']
+];
+
+// Block specific entity IDs
+$internalData = [
+    'l' => [666, 999, 1337]
+];
+
+// Mixed identifiers
+$internalData = [
+    'l' => ['spammer', 42, 'bot_account', 101]
+];
+```
+
+### External Data Structure Example
+
+```php
+// String entity
+$externalData = [
+    'entity' => 'banned_user_1'
+];
+
+// Integer entity
+$externalData = [
+    'entity' => 999
+];
+```
+
+### Validation Logic
+
+<Warning>
+  Note: There appears to be a logic error in the source code at line 50-51. The method validates `externalData` with `validateDataIntegrity()` but returns `false` on success, which seems incorrect. The intended behavior should be to check if the entity is in the blocklist.
+</Warning>
+
+Expected validation logic:
+- Validates that `internalData['l']` is an array
+- Validates that `externalData['entity']` is a string or integer
+- Checks: `in_array($externalData['entity'], $internalData['l'])`
+- Returns `false` if entity is found in the denied list
+
+### Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByEntity;
+
+// Block access for banned users
+$restrictions = [
+    'deny' => [
+        ['d' => [
+            'l' => ['banned_user_1', 'spammer_account', 'suspended_user']
+        ]]
+    ]
+];
+
+$byEntity = new ByEntity($restrictions);
+
+// Check if regular user has access
+$externalData = ['entity' => 'regular_user'];
+$isAllowed = $byEntity->run($externalData);
+
+if ($isAllowed) {
+    // Access granted - entity not in denylist
+}
+
+// Check banned user
+$externalData = ['entity' => 'banned_user_1'];
+$isAllowed = $byEntity->run($externalData);
+
+if (!$isAllowed) {
+    $error = $byEntity->getError();
+    // Access denied - entity is blocked
+    // $error['method'] === 'deny'
+    // $error['restriction'] contains the restriction data
+}
+```
+
+---
+
+## Data Validation
+
+Both methods validate data integrity before processing:
+
+### Internal Data Validation
+
+- Requires `l` key with array value
+- Array can contain strings, integers, or mixed types
+- Empty arrays are valid but will block/allow no entities
+
+### External Data Validation
+
+- Requires `entity` key
+- Value must be string OR integer type
+- Both types are valid and can be mixed with internal list
+
+### Validation Failure
+
+If data validation fails:
+- Methods return `false` immediately
+- No restriction checking is performed
+- Error information can be retrieved via `getError()`
+
+---
+
+## Common Patterns
+
+### Allowlist Pattern
+
+Use `allow()` when you want explicit control over who can access:
+
+```php
+// Only specific roles can access admin panel
+$restrictions = [
+    'allow' => [
+        ['d' => ['l' => ['admin', 'superuser', 'moderator']]]
+    ]
+];
+```
+
+### Denylist Pattern
+
+Use `deny()` when you want to block specific entities:
+
+```php
+// Block known malicious users
+$restrictions = [
+    'deny' => [
+        ['d' => ['l' => ['banned_123', 'spammer_456', 'bot_789']]]
+    ]
+];
+```
+
+### Combined Pattern
+
+You can combine both methods for complex access control:
+
+```php
+// Allow premium users but block specific banned accounts
+$restrictions = [
+    'allow' => [
+        ['d' => ['l' => ['premium_user_1', 'premium_user_2', 'banned_premium']]]
+    ],
+    'deny' => [
+        ['d' => ['l' => ['banned_premium']]]  // Override even if in allowlist
+    ]
+];
+
+$byEntity = new ByEntity($restrictions);
+
+// This will be denied despite being in allowlist
+$externalData = ['entity' => 'banned_premium'];
+$isAllowed = $byEntity->run($externalData);  // false
+```
+
+---
+
+## Working with User IDs
+
+### String-based User IDs
+
+```php
+use DancasDev\GAC\Restrictions\ByEntity;
+
+$restrictions = [
+    'allow' => [
+        ['d' => [
+            'l' => [
+                'user_550e8400-e29b-41d4-a716-446655440000',
+                'user_6ba7b810-9dad-11d1-80b4-00c04fd430c8'
+            ]
+        ]]
+    ]
+];
+
+$byEntity = new ByEntity($restrictions);
+
+// Validate UUID-based user
+$externalData = ['entity' => 'user_550e8400-e29b-41d4-a716-446655440000'];
+$isAllowed = $byEntity->run($externalData);  // true
+```
+
+### Integer-based User IDs
+
+```php
+use DancasDev\GAC\Restrictions\ByEntity;
+
+$restrictions = [
+    'deny' => [
+        ['d' => [
+            'l' => [1001, 1002, 1003, 1004]  // Blocked user IDs
+        ]]
+    ]
+];
+
+$byEntity = new ByEntity($restrictions);
+
+// Validate numeric user ID
+$externalData = ['entity' => 1001];
+$isAllowed = $byEntity->run($externalData);  // false (blocked)
+
+$externalData = ['entity' => 2000];
+$isAllowed = $byEntity->run($externalData);  // true (not blocked)
+```
+
+---
+
+## Complete Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByEntity;
+
+// Multi-tier access control system
+$adminRestrictions = [
+    'allow' => [
+        ['d' => ['l' => [1, 2, 3]]]  // Only admin IDs 1, 2, 3
+    ],
+    'deny' => [
+        ['d' => ['l' => [2]]]  // Temporarily suspend admin ID 2
+    ]
+];
+
+$byEntity = new ByEntity($adminRestrictions);
+
+// Check admin 1 (allowed, not denied)
+$result = $byEntity->run(['entity' => 1]);
+if ($result) {
+    echo "Admin 1: Access granted\n";
+}
+
+// Check admin 2 (allowed but denied)
+$result = $byEntity->run(['entity' => 2]);
+if (!$result) {
+    $error = $byEntity->getError();
+    echo "Admin 2: Access denied - {$error['method']}\n";
+    // Output: Admin 2: Access denied - deny
+}
+
+// Check admin 5 (not in allowlist)
+$result = $byEntity->run(['entity' => 5]);
+if (!$result) {
+    $error = $byEntity->getError();
+    echo "Admin 5: Access denied - {$error['method']}\n";
+    // Output: Admin 5: Access denied - allow
+}
+
+// Check with string entity
+$result = $byEntity->run(['entity' => 'admin_user']);
+if (!$result) {
+    $error = $byEntity->getError();
+    echo "String entity: Access denied\n";
+}
+```
+
+---
+
+## Error Handling
+
+When a restriction fails, retrieve error details:
+
+```php
+use DancasDev\GAC\Restrictions\ByEntity;
+
+$restrictions = [
+    'allow' => [
+        ['d' => ['l' => ['user_1', 'user_2']]]
+    ]
+];
+
+$byEntity = new ByEntity($restrictions);
+
+$externalData = ['entity' => 'user_3'];
+$isAllowed = $byEntity->run($externalData);
+
+if (!$isAllowed) {
+    $error = $byEntity->getError();
+    
+    // Error structure:
+    // [
+    //     'method' => 'allow',
+    //     'restriction' => [
+    //         'd' => ['l' => ['user_1', 'user_2']]
+    //     ]
+    // ]
+    
+    $failedMethod = $error['method'];  // 'allow'
+    $restrictionData = $error['restriction'];  // The restriction that failed
+    
+    // Custom error message
+    if ($failedMethod === 'allow') {
+        echo "Access denied: Entity not in allowlist";
+    } elseif ($failedMethod === 'deny') {
+        echo "Access denied: Entity is blocked";
+    }
+}
+```
+
+---
+
+## Type Safety
+
+The `ByEntity` class enforces type checking:
+
+```php
+// Valid: String entity
+$externalData = ['entity' => 'user_123'];
+
+// Valid: Integer entity
+$externalData = ['entity' => 42];
+
+// Invalid: Array (will fail validation)
+$externalData = ['entity' => ['user_123']];
+
+// Invalid: Object (will fail validation)
+$externalData = ['entity' => (object)['id' => 123]];
+
+// Invalid: Float (will fail validation)
+$externalData = ['entity' => 3.14];
+```
+
+---
+
+## Best Practices
+
+1. **Use allowlists for sensitive resources**: Explicitly define who can access critical features
+2. **Use denylists for bans**: Block specific problematic entities while allowing others
+3. **Combine with other restrictions**: Use alongside `ByDate` for time-based entity access
+4. **Handle errors gracefully**: Always check return value and provide user feedback
+5. **Type consistency**: Keep entity identifiers consistent (all strings or all integers)
+6. **Regular updates**: Update blocklists/allowlists as needed for security
+
+---
+
+## Related
+
+- [ByDate](/api/restrictions/by-date) - Date-based restrictions
+- [Restrictions](/api/restrictions/overview) - Base restriction system

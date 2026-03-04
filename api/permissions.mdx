@@ -1,0 +1,256 @@
+---
+title: 'Permissions'
+description: 'Collection class for managing module permissions'
+---
+
+## Overview
+
+The `Permissions` class manages a collection of module permissions for an entity. It provides methods to check permission existence, retrieve individual permissions, and manage the permission list.
+
+## Constructor
+
+Creates a new Permissions instance with a permission list.
+
+```php
+public function __construct(array $list)
+```
+
+<ParamField path="list" type="array" required>
+  Array of permissions indexed by module code. Each permission contains:
+  - `i` (int): Permission ID
+  - `d` (string): Module developing status ('0' or '1')
+  - `f` (array): Feature codes (e.g., ['0', '1', '2'] for create, read, update)
+  - `l` (int): Permission level
+</ParamField>
+
+<Note>
+  Typically, you don't instantiate this directly. Use `GAC::getPermissions()` instead.
+</Note>
+
+```php
+// Retrieved from GAC
+$permissions = $gac->setEntity('user', 123)->getPermissions();
+```
+
+## Methods
+
+### has()
+
+Checks if permission exists for a specific module.
+
+```php
+public function has(string $moduleCode): bool
+```
+
+<ParamField path="moduleCode" type="string" required>
+  The unique code identifying the module (e.g., `'invoices'`, `'products'`, `'users'`)
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if the entity has permission to access the module, `false` otherwise
+</ResponseField>
+
+```php
+if ($permissions->has('invoices')) {
+    // User has permission to access invoices module
+    echo "Access granted to invoices";
+} else {
+    echo "Access denied";
+}
+```
+
+### get()
+
+Retrieves a Permission instance for a specific module.
+
+```php
+public function get(string $moduleCode): Permission|null
+```
+
+<ParamField path="moduleCode" type="string" required>
+  The unique code identifying the module
+</ParamField>
+
+<ResponseField name="return" type="Permission|null">
+  Returns a `Permission` instance with permission details, or `null` if no permission exists
+</ResponseField>
+
+**Throws:** `Exception` if permission data is invalid
+
+```php
+$invoicePermission = $permissions->get('invoices');
+
+if ($invoicePermission !== null) {
+    // Check specific features
+    if ($invoicePermission->hasFeature('create')) {
+        echo "Can create invoices";
+    }
+    
+    // Get permission level
+    $level = $invoicePermission->getLevel();
+    echo "Permission level: " . $level;
+}
+```
+
+### getList()
+
+Returns the complete permission list.
+
+```php
+public function getList(): array
+```
+
+<ResponseField name="return" type="array">
+  Array of all permissions indexed by module code
+</ResponseField>
+
+```php
+$allPermissions = $permissions->getList();
+
+foreach ($allPermissions as $moduleCode => $permData) {
+    echo "Module: $moduleCode\n";
+    echo "Permission ID: {$permData['i']}\n";
+    echo "Level: {$permData['l']}\n";
+}
+```
+
+### setList()
+
+Replaces the entire permission list.
+
+```php
+public function setList(array $list): Permissions
+```
+
+<ParamField path="list" type="array" required>
+  New permission array to replace the current list
+</ParamField>
+
+<ResponseField name="return" type="Permissions">
+  Returns the Permissions instance for method chaining
+</ResponseField>
+
+```php
+$newPermissions = [
+    'products' => [
+        'i' => 5,
+        'd' => '0',
+        'f' => ['1', '2'], // read, update
+        'l' => 2
+    ]
+];
+
+$permissions->setList($newPermissions);
+```
+
+## Permission Data Structure
+
+Each permission in the list follows this structure:
+
+<ResponseField name="i" type="int">
+  Permission record ID from the database
+</ResponseField>
+
+<ResponseField name="d" type="string">
+  Module development status: `'0'` (stable) or `'1'` (developing)
+</ResponseField>
+
+<ResponseField name="f" type="array">
+  Array of feature codes:
+  - `'0'`: create
+  - `'1'`: read
+  - `'2'`: update
+  - `'3'`: delete
+  - `'4'`: trash
+  - `'5'`: dev
+</ResponseField>
+
+<ResponseField name="l" type="int">
+  Permission level (numeric value indicating access tier)
+</ResponseField>
+
+## Usage Examples
+
+### Basic Permission Check
+
+```php
+$gac = new GAC();
+$gac->setDatabase($pdo)
+    ->setEntity('user', 456);
+
+$permissions = $gac->getPermissions();
+
+// Simple existence check
+if (!$permissions->has('admin_panel')) {
+    throw new Exception('Access denied');
+}
+```
+
+### Detailed Permission Inspection
+
+```php
+// Get all modules user can access
+$allPermissions = $permissions->getList();
+$accessibleModules = array_keys($allPermissions);
+
+echo "User has access to: " . implode(', ', $accessibleModules);
+
+// Check each module's features
+foreach ($accessibleModules as $module) {
+    $permission = $permissions->get($module);
+    
+    echo "\nModule: $module";
+    echo "\n  Can create: " . ($permission->hasFeature('create') ? 'Yes' : 'No');
+    echo "\n  Can read: " . ($permission->hasFeature('read') ? 'Yes' : 'No');
+    echo "\n  Can update: " . ($permission->hasFeature('update') ? 'Yes' : 'No');
+    echo "\n  Can delete: " . ($permission->hasFeature('delete') ? 'Yes' : 'No');
+    echo "\n  Level: " . $permission->getLevel();
+}
+```
+
+### Conditional UI Rendering
+
+```php
+// Show UI elements based on permissions
+$permissions = $gac->setEntity('user', $userId)->getPermissions();
+
+if ($permissions->has('reports')) {
+    $reportPerm = $permissions->get('reports');
+    
+    // Show reports menu
+    echo '<a href="/reports">Reports</a>';
+    
+    // Show create button only if user can create
+    if ($reportPerm->hasFeature('create')) {
+        echo '<button>New Report</button>';
+    }
+    
+    // Show export button for higher permission levels
+    if ($reportPerm->getLevel() >= 3) {
+        echo '<button>Export All</button>';
+    }
+}
+```
+
+### Permission Caching Pattern
+
+```php
+// Get from cache (default behavior)
+$permissions = $gac->getPermissions(true);
+
+// Force refresh from database
+$permissions = $gac->getPermissions(false);
+
+// After updating permissions in database, clear cache
+// ... update permissions in DB ...
+$gac->clearCache();
+
+// Next call will fetch fresh data
+$permissions = $gac->getPermissions();
+```
+
+## See Also
+
+- [Permission](/api/permission) - Individual permission object
+- [GAC](/api/gac) - Main GAC class reference
+- [Checking Permissions Guide](/guides/checking-permissions) - Practical usage guide

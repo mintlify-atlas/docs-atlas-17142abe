@@ -1,0 +1,293 @@
+---
+title: Permissions System
+description: Understanding how permissions work in GAC, including module vs category permissions, feature flags, and inheritance
+---
+
+## Overview
+
+The GAC permissions system controls access to modules through a granular approach that supports both category-level and module-level permissions. Permissions can be assigned directly to entities (users/clients) or inherited from roles, with a priority system determining which permissions take precedence.
+
+## Permission Structure
+
+Each permission in GAC contains the following key attributes:
+
+- **Module Code**: Unique identifier for the module
+- **Level**: Access level (integer value)
+- **Features**: Array of feature flags (CRUD operations)
+- **Is Developing**: Flag indicating if module is in development mode
+
+```php
+// Internal permission data structure (GAC.php:429-434)
+[
+    'i' => $permission['id'],           // Permission ID
+    'd' => $moduleData['is_developing'], // Is developing flag
+    'f' => $permission['feature'],       // Feature flags array
+    'l' => $permission['level']          // Access level
+]
+```
+
+## Module vs Category Permissions
+
+GAC supports two types of permission assignment:
+
+### Category-Level Permissions
+
+When a permission is assigned to a category (`to_entity_type = '0'`), it automatically grants access to all modules within that category. This provides a convenient way to grant broad access.
+
+```php
+// Category permission processing (GAC.php:411-414)
+if ($permission['to_entity_type'] === '0') {
+    // Get all modules in this category
+    $result = $modulesBy['category'][$permission['to_entity_id']] ?? [];
+}
+```
+
+### Module-Level Permissions
+
+Direct module permissions (`to_entity_type = '1'`) grant access to a specific module, allowing for fine-grained control.
+
+```php
+// Module permission processing (GAC.php:415-418)
+elseif ($permission['to_entity_type'] === '1') {
+    // Direct module access
+    $result[] = $permission['to_entity_id']; 
+}
+```
+
+<Note>
+When both category and module permissions exist for the same module, the priority system determines which takes precedence.
+</Note>
+
+## Feature Flags
+
+GAC uses feature flags to control specific operations within a module. The standard features follow CRUD patterns:
+
+```php
+// Feature mapping (Permission.php:12)
+protected $featureKeys = [
+    'create' => '0',
+    'read'   => '1', 
+    'update' => '2',
+    'delete' => '3',
+    'trash'  => '4',
+    'dev'    => '5'
+];
+```
+
+### Checking Features
+
+You can check if a permission includes specific features:
+
+```php
+// Check single feature
+$permission = $gac->getPermissions()->get('users');
+if ($permission->hasFeature('create')) {
+    // User can create
+}
+
+// Check multiple features
+if ($permission->hasFeature(['read', 'update'])) {
+    // User can read AND update
+}
+```
+
+The `hasFeature()` method implementation:
+
+```php
+// Feature validation (Permission.php:54-72)
+public function hasFeature(string|array $feature) : bool {
+    if (empty($this->feature) || !is_array($this->feature)) {
+        return false;
+    }
+    
+    $feature = is_array($feature) ? $feature : [$feature];
+    foreach ($feature as $value) {
+        // Convert string to key if needed
+        $value = $this->featureKeys[$value] ?? $value;
+        if (!in_array($value, $this->feature)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+```
+
+## Permission Inheritance
+
+Permissions can come from two sources:
+
+1. **Personal Permissions**: Assigned directly to the entity
+2. **Role Permissions**: Inherited from assigned roles
+
+### Priority System
+
+The priority system determines which permission applies when multiple sources grant access to the same module:
+
+```php
+// Priority assignment (GAC.php:381-386)
+if ($record['from_entity_type'] !== '0') {
+    // Personal permissions: highest priority (-1)
+    $record['priority'] = -1;
+} else {
+    // Role permissions: use role priority
+    $record['priority'] = $roleData['priority'][$record['from_entity_id']] ?? 100;
+}
+```
+
+<Accordion title="Priority Resolution Example">
+```php
+// Permissions are sorted by priority (GAC.php:402-405)
+usort($permissions, function(array $a, array $b) {
+    return $a['priority'] <=> $b['priority'];
+});
+
+// First matching permission wins (GAC.php:428)
+if (!array_key_exists($moduleData['code'], $response)) {
+    $response[$moduleData['code']] = [...permission data...];
+}
+```
+
+**Priority Order** (lowest to highest):
+1. Personal permissions (`priority = -1`) - Always applied first
+2. Role permissions (sorted by role priority) - Applied in order
+3. Skipped if permission already exists for the module
+</Accordion>
+
+## Loading Permissions
+
+Permissions are loaded from the database and cached for performance:
+
+```php
+// Set entity and load permissions
+$gac->setEntity('user', $userId);
+$permissions = $gac->getPermissions(); // Loads from cache if available
+
+// Force reload from database
+$permissions = $gac->getPermissions(false);
+```
+
+### The Permissions Object
+
+The `Permissions` class provides methods to work with loaded permissions:
+
+```php
+// Check if permission exists
+if ($permissions->has('users')) {
+    // Entity has access to the 'users' module
+}
+
+// Get permission details
+$permission = $permissions->get('users');
+if ($permission) {
+    $level = $permission->getLevel();           // Access level
+    $features = $permission->getFeature();      // Array of features
+    $isDev = $permission->moduleIsDeveloping(); // Development status
+}
+```
+
+## Development Mode
+
+Modules can be marked as "developing" to restrict access:
+
+```php
+// Check if module is in development (Permission.php:43-45)
+public function moduleIsDeveloping() : bool {
+    return $this->module_is_developing == '1';
+}
+```
+
+<Warning>
+Modules in development mode should typically only be accessible to users with the 'dev' feature flag.
+</Warning>
+
+## Database Schema
+
+Permissions are stored in the `gac_module_access` table:
+
+```sql
+-- Permission query (DatabaseAdapter.php:67-74)
+SELECT id, from_entity_type, from_entity_id, 
+       to_entity_type, to_entity_id, feature, level
+FROM `gac_module_access` 
+WHERE ((`from_entity_type` = ? AND `from_entity_id` = ?)
+   OR (`from_entity_type` = '0' AND `from_entity_id` = ?)) -- Roles
+AND `deleted_at` IS NULL 
+AND `is_disabled` = '0'
+ORDER BY `from_entity_type` DESC
+```
+
+**Field Descriptions**:
+- `from_entity_type`: Source entity type ('0' = role, '1' = user, '2' = client)
+- `from_entity_id`: Source entity ID
+- `to_entity_type`: Target type ('0' = category, '1' = module)
+- `to_entity_id`: Target ID (category or module ID)
+- `feature`: Comma-separated feature flags
+- `level`: Access level integer
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Categories for Broad Access" icon="folder-tree">
+    Assign category-level permissions for general access to simplify management.
+  </Card>
+  
+  <Card title="Use Modules for Exceptions" icon="file">
+    Override category permissions with specific module permissions for exceptions.
+  </Card>
+  
+  <Card title="Leverage Role Priority" icon="layer-group">
+    Use role priority to create hierarchical permission structures.
+  </Card>
+  
+  <Card title="Personal > Inherited" icon="user">
+    Remember that personal permissions always override role permissions.
+  </Card>
+</CardGroup>
+
+## Example: Complete Permission Flow
+
+```php
+// 1. Initialize GAC
+$gac = new GAC();
+$gac->setDatabase($pdoConnection);
+$gac->setCache('my_app', 3600);
+
+// 2. Set the entity
+$gac->setEntity('user', 123);
+
+// 3. Load permissions
+$permissions = $gac->getPermissions();
+
+// 4. Check access
+if ($permissions->has('users')) {
+    $permission = $permissions->get('users');
+    
+    // Check specific features
+    if ($permission->hasFeature(['read', 'update'])) {
+        // User can view and edit users
+        echo "Access Level: " . $permission->getLevel();
+    }
+    
+    // Check development mode
+    if ($permission->moduleIsDeveloping() && !$permission->hasFeature('dev')) {
+        // Block access to developing modules
+        throw new Exception('Module under development');
+    }
+} else {
+    // No access to users module
+    throw new Exception('Access denied');
+}
+```
+
+## Related Topics
+
+<CardGroup cols={2}>
+  <Card title="Roles & Entities" href="/concepts/roles-entities" icon="users">
+    Learn about entity types and role priority
+  </Card>
+  
+  <Card title="Caching" href="/concepts/caching" icon="bolt">
+    Understand how permissions are cached
+  </Card>
+</CardGroup>

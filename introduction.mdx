@@ -1,0 +1,138 @@
+---
+title: Introduction
+description: Learn about GAC (Granular Access Control) for PHP and how it helps manage permissions and restrictions in your backend applications
+---
+
+## What is GAC?
+
+GAC (Granular Access Control) is a flexible and efficient PHP library that provides a comprehensive system for managing access permissions in backend applications. Whether you're building APIs, MVC applications, or any other PHP backend system, GAC gives you fine-grained control over who can access what.
+
+## Key features
+
+GAC provides powerful access control capabilities designed for real-world applications:
+
+<CardGroup cols={2}>
+  <Card title="Role-based permissions" icon="users">
+    Assign permissions to users and clients through roles with priority-based inheritance
+  </Card>
+  <Card title="Module-level control" icon="lock">
+    Grant access to entire module categories or specific individual modules
+  </Card>
+  <Card title="Feature-based access" icon="sliders">
+    Control granular features like create, read, update, delete, trash access, and development mode
+  </Card>
+  <Card title="Access restrictions" icon="shield">
+    Apply date-based and entity-based restrictions with customizable validation rules
+  </Card>
+  <Card title="Built-in caching" icon="bolt">
+    Improve performance with file-based or custom cache adapters
+  </Card>
+  <Card title="Flexible adapters" icon="plug">
+    Use the default PDO adapter or implement your own database and cache adapters
+  </Card>
+</CardGroup>
+
+## How it works
+
+GAC operates on a hierarchical permission model:
+
+<Steps>
+  <Step title="Define entities">
+    Set up users and clients as entities that need access control
+  </Step>
+  <Step title="Assign roles">
+    Create roles with specific permissions and assign them to entities with priority levels
+  </Step>
+  <Step title="Configure permissions">
+    Grant access to modules or module categories with specific features (CRUD operations)
+  </Step>
+  <Step title="Apply restrictions">
+    Add optional restrictions like date ranges or entity-specific access rules
+  </Step>
+  <Step title="Check access">
+    Query permissions in your application to authorize actions
+  </Step>
+</Steps>
+
+## Permission hierarchy
+
+GAC resolves permissions using a priority-based system:
+
+1. **Personal permissions** - Direct permissions assigned to a user or client (highest priority)
+2. **Role permissions** - Inherited from assigned roles based on role priority
+3. **Granularity** - Category-level permissions can be overridden by module-level permissions
+
+<Info>
+  Personal permissions always take precedence over role-based permissions. Among roles, the priority field determines which role's permissions apply first.
+</Info>
+
+## Use cases
+
+GAC is ideal for applications that require sophisticated access control:
+
+### Multi-tenant applications
+
+Manage different permission sets for various clients or organizations accessing your system.
+
+```php
+$gac->setEntity('client', $clientId)
+    ->getPermissions();
+```
+
+### Role-based systems
+
+Build admin panels, dashboards, or enterprise applications with multiple user roles.
+
+```php
+// System administrator with full access
+// Department supervisor with limited access
+// Regular user with read-only access
+```
+
+### API access control
+
+Control which API clients can access specific endpoints and operations.
+
+```php
+if ($permissions->has('users') && $permission->hasFeature('create')) {
+    // Allow user creation
+}
+```
+
+### Time-based restrictions
+
+Enforce access windows for temporary access or scheduled operations.
+
+```php
+$restrictions = $gac->getRestrictions();
+if ($restrictions->get('by_date')->run(['date' => time()])) {
+    // Access allowed in current time window
+}
+```
+
+## Architecture overview
+
+GAC consists of several key components:
+
+<CardGroup cols={2}>
+  <Card title="GAC core class" icon="database">
+    Main class for configuring connections and retrieving permissions
+  </Card>
+  <Card title="Permissions" icon="key">
+    Classes for checking module access and features
+  </Card>
+  <Card title="Restrictions" icon="ban">
+    Extensible system for validating access constraints
+  </Card>
+  <Card title="Adapters" icon="puzzle-piece">
+    Database and cache adapters with customizable implementations
+  </Card>
+</CardGroup>
+
+## What's next?
+
+Ready to get started? Follow our installation guide to add GAC to your project.
+
+<Card title="Installation" icon="download" href="/installation">
+  Install GAC via Composer and set up your database
+</Card>

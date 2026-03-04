@@ -1,0 +1,432 @@
+---
+title: 'Restrictions'
+description: 'Collection class for managing access restrictions'
+---
+
+## Overview
+
+The `Restrictions` class manages a collection of restrictions that limit entity access based on various criteria (date, location, entity relationships, etc.). It provides methods to check, retrieve, and register custom restriction types.
+
+## Constructor
+
+Creates a new Restrictions instance with a restriction list.
+
+```php
+public function __construct(array $list)
+```
+
+<ParamField path="list" type="array" required>
+  Nested array of restrictions organized by category and type, containing both personal (`p`) and global (`g`) restrictions
+</ParamField>
+
+<Note>
+  Typically, you don't instantiate this directly. Use `GAC::getRestrictions()` instead.
+</Note>
+
+```php
+// Retrieved from GAC
+$restrictions = $gac->setEntity('user', 123)->getRestrictions();
+```
+
+## Methods
+
+### has()
+
+Checks if restrictions exist for a specific category.
+
+```php
+public function has(string $categoryCode): bool
+```
+
+<ParamField path="categoryCode" type="string" required>
+  The restriction category code (e.g., `'by_date'`, `'by_branch'`, `'by_ip'`)
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if restrictions exist for the category, `false` otherwise
+</ResponseField>
+
+```php
+if ($restrictions->has('by_date')) {
+    // Date restrictions are active
+    echo "Date-based access control is enabled";
+}
+
+if ($restrictions->has('by_branch')) {
+    // Branch restrictions are active
+    echo "Branch-based access control is enabled";
+}
+```
+
+### get()
+
+Retrieves a Restriction instance for a specific category.
+
+```php
+public function get(string $categoryCode): mixed
+```
+
+<ParamField path="categoryCode" type="string" required>
+  The restriction category code
+</ParamField>
+
+<ResponseField name="return" type="mixed">
+  Returns an instance of the registered restriction class (e.g., `ByDate`, `ByEntity`), or `null` if no restrictions exist for that category
+</ResponseField>
+
+**Throws:** 
+- `Exception` if restriction data is invalid
+- `Exception` if no handler is defined for the category
+
+```php
+$dateRestriction = $restrictions->get('by_date');
+
+if ($dateRestriction !== null) {
+    // Validate against current date
+    $isAllowed = $dateRestriction->run(['date' => time()]);
+    
+    if (!$isAllowed) {
+        $error = $dateRestriction->getError();
+        throw new Exception('Access denied: ' . $error['method']);
+    }
+}
+```
+
+### getList()
+
+Returns the complete restriction list.
+
+```php
+public function getList(): array
+```
+
+<ResponseField name="return" type="array">
+  Nested array of all restrictions indexed by category and type
+</ResponseField>
+
+```php
+$allRestrictions = $restrictions->getList();
+
+foreach ($allRestrictions as $category => $types) {
+    echo "Category: $category\n";
+    foreach ($types as $type => $data) {
+        echo "  Type: $type\n";
+        if (isset($data['p'])) {
+            echo "    Personal restriction ID: {$data['p']['i']}\n";
+        }
+        if (isset($data['g'])) {
+            echo "    Global restriction ID: {$data['g']['i']}\n";
+        }
+    }
+}
+```
+
+### setList()
+
+Replaces the entire restriction list.
+
+```php
+public function setList(array $list): Restrictions
+```
+
+<ParamField path="list" type="array" required>
+  New restriction array to replace the current list
+</ParamField>
+
+<ResponseField name="return" type="Restrictions">
+  Returns the Restrictions instance for method chaining
+</ResponseField>
+
+```php
+$newRestrictions = [
+    'by_date' => [
+        'in_range' => [
+            'p' => [
+                'i' => 10,
+                'd' => ['sd' => '2024-01-01', 'ed' => '2024-12-31']
+            ]
+        ]
+    ]
+];
+
+$restrictions->setList($newRestrictions);
+```
+
+### register()
+
+Registers a custom restriction class.
+
+```php
+public static function register(string $alias, string $className): void
+```
+
+<ParamField path="alias" type="string" required>
+  Alias/category code for the restriction type (e.g., `'by_ip'`, `'by_location'`)
+</ParamField>
+
+<ParamField path="className" type="string" required>
+  Fully qualified class name that extends `Restriction` base class
+</ParamField>
+
+**Throws:** `InvalidArgumentException` if class doesn't extend `Restriction`
+
+```php
+use DancasDev\GAC\Restrictions\Restrictions;
+use App\Restrictions\ByIpAddress;
+
+// Register custom restriction
+Restrictions::register('by_ip', ByIpAddress::class);
+
+// Now you can use it
+$restrictions = $gac->getRestrictions();
+if ($restrictions->has('by_ip')) {
+    $ipRestriction = $restrictions->get('by_ip');
+    $isAllowed = $ipRestriction->run(['ip' => $_SERVER['REMOTE_ADDR']]);
+}
+```
+
+## Built-in Restriction Types
+
+GAC includes two built-in restriction handlers:
+
+<ResponseField name="by_date" type="ByDate">
+  Time-based access restrictions (before, after, in_range, out_range)
+</ResponseField>
+
+<ResponseField name="by_branch" type="ByEntity">
+  Entity-based restrictions (allow, deny specific entities)
+</ResponseField>
+
+## Restriction Data Structure
+
+Each restriction category contains types with personal and/or global restrictions:
+
+```php
+[
+    'category_code' => [
+        'type_code' => [
+            'p' => [  // Personal restriction
+                'i' => 123,  // Restriction ID
+                'd' => [...]  // Restriction data
+            ],
+            'g' => [  // Global restriction
+                'i' => 456,  // Restriction ID
+                'd' => [...]  // Restriction data
+            ]
+        ]
+    ]
+]
+```
+
+<ResponseField name="p" type="array">
+  Personal restrictions (entity-specific or role-based)
+</ResponseField>
+
+<ResponseField name="g" type="array">
+  Global restrictions (apply to all entities)
+</ResponseField>
+
+<ResponseField name="i" type="int">
+  Database ID of the restriction record
+</ResponseField>
+
+<ResponseField name="d" type="array">
+  Restriction-specific data (varies by restriction type)
+</ResponseField>
+
+## Usage Examples
+
+### Basic Restriction Check
+
+```php
+$gac = new GAC();
+$gac->setDatabase($pdo)
+    ->setEntity('user', 456);
+
+$restrictions = $gac->getRestrictions();
+
+// Check if date restrictions apply
+if ($restrictions->has('by_date')) {
+    $dateRestriction = $restrictions->get('by_date');
+    
+    if (!$dateRestriction->run(['date' => time()])) {
+        throw new Exception('Access denied: outside allowed time window');
+    }
+}
+```
+
+### Multiple Restriction Validation
+
+```php
+function validateAllRestrictions($restrictions, $context) {
+    $categories = ['by_date', 'by_branch', 'by_ip'];
+    
+    foreach ($categories as $category) {
+        if (!$restrictions->has($category)) {
+            continue;
+        }
+        
+        $restriction = $restrictions->get($category);
+        if (!$restriction->run($context)) {
+            $error = $restriction->getError();
+            return [
+                'allowed' => false,
+                'reason' => "Restricted by {$category}",
+                'method' => $error['method'] ?? 'unknown'
+            ];
+        }
+    }
+    
+    return ['allowed' => true];
+}
+
+// Usage
+$result = validateAllRestrictions($restrictions, [
+    'date' => time(),
+    'entity' => $branchId,
+    'ip' => $_SERVER['REMOTE_ADDR']
+]);
+
+if (!$result['allowed']) {
+    die('Access denied: ' . $result['reason']);
+}
+```
+
+### Custom Restriction Implementation
+
+```php
+use DancasDev\GAC\Restrictions\Restriction;
+
+class ByIpAddress extends Restriction {
+    protected array $methods = [
+        'whitelist' => 'whitelist',
+        'blacklist' => 'blacklist',
+    ];
+    
+    public function whitelist(array $internalData, array $externalData): bool {
+        if (!$this->validateDataIntegrity($internalData, ['ips' => ['array']])) {
+            return false;
+        }
+        
+        if (!$this->validateDataIntegrity($externalData, ['ip' => ['string']])) {
+            return false;
+        }
+        
+        return in_array($externalData['ip'], $internalData['ips']);
+    }
+    
+    public function blacklist(array $internalData, array $externalData): bool {
+        if (!$this->validateDataIntegrity($internalData, ['ips' => ['array']])) {
+            return false;
+        }
+        
+        if (!$this->validateDataIntegrity($externalData, ['ip' => ['string']])) {
+            return false;
+        }
+        
+        return !in_array($externalData['ip'], $internalData['ips']);
+    }
+}
+
+// Register and use
+Restrictions::register('by_ip', ByIpAddress::class);
+
+$restrictions = $gac->getRestrictions();
+if ($restrictions->has('by_ip')) {
+    $ipRestriction = $restrictions->get('by_ip');
+    $allowed = $ipRestriction->run(['ip' => $_SERVER['REMOTE_ADDR']]);
+}
+```
+
+### Date Restriction Example
+
+```php
+// Check if user can access during business hours
+$restrictions = $gac->getRestrictions();
+
+if ($restrictions->has('by_date')) {
+    $dateRestriction = $restrictions->get('by_date');
+    
+    // Current timestamp
+    $now = time();
+    
+    if (!$dateRestriction->run(['date' => $now])) {
+        $error = $dateRestriction->getError();
+        
+        switch ($error['method']) {
+            case 'before':
+                die('Access not yet available');
+            case 'after':
+                die('Access period has ended');
+            case 'in_range':
+                die('Access only allowed during specific dates');
+            case 'out_range':
+                die('Access blocked during this period');
+        }
+    }
+}
+```
+
+### Entity/Branch Restriction Example
+
+```php
+// Check if user can access specific branch
+$restrictions = $gac->getRestrictions();
+
+if ($restrictions->has('by_branch')) {
+    $branchRestriction = $restrictions->get('by_branch');
+    
+    $requestedBranch = $_GET['branch_id'];
+    
+    if (!$branchRestriction->run(['entity' => $requestedBranch])) {
+        throw new Exception('You do not have access to this branch');
+    }
+}
+```
+
+### Combining with Permissions
+
+```php
+function checkFullAccess($gac, $moduleCode, $branchId) {
+    // Check permissions first
+    $permissions = $gac->getPermissions();
+    if (!$permissions->has($moduleCode)) {
+        return ['allowed' => false, 'reason' => 'No permission'];
+    }
+    
+    // Check restrictions
+    $restrictions = $gac->getRestrictions();
+    
+    // Date restriction
+    if ($restrictions->has('by_date')) {
+        $dateRestriction = $restrictions->get('by_date');
+        if (!$dateRestriction->run(['date' => time()])) {
+            return ['allowed' => false, 'reason' => 'Time restriction'];
+        }
+    }
+    
+    // Branch restriction
+    if ($restrictions->has('by_branch')) {
+        $branchRestriction = $restrictions->get('by_branch');
+        if (!$branchRestriction->run(['entity' => $branchId])) {
+            return ['allowed' => false, 'reason' => 'Branch restriction'];
+        }
+    }
+    
+    return ['allowed' => true];
+}
+
+// Usage
+$result = checkFullAccess($gac, 'invoices', 'branch-123');
+if (!$result['allowed']) {
+    die('Access denied: ' . $result['reason']);
+}
+```
+
+## See Also
+
+- [Restriction](/api/restriction) - Base restriction class
+- [ByDate](/api/restrictions/by-date) - Date-based restrictions
+- [ByEntity](/api/restrictions/by-entity) - Entity-based restrictions
+- [GAC](/api/gac) - Main GAC class reference
+- [Managing Restrictions Guide](/guides/managing-restrictions) - Practical usage guide

@@ -1,0 +1,538 @@
+---
+title: Checking Permissions
+description: How to check and validate permissions in your application
+icon: shield-check
+---
+
+## Overview
+
+GAC provides a fluent API for checking permissions based on modules and features. This guide shows you how to implement permission checks in your application.
+
+## Basic Permission Checking
+
+### Setting Up the Entity
+
+Before checking permissions, you must set the entity (user or client):
+
+```php
+use DancasDev\GAC\GAC;
+
+$gac = new GAC();
+$gac->setDatabase($pdo);
+$gac->setCache();
+
+// For a user
+$gac->setEntity('user', $userId);
+
+// Or for a client (API application)
+$gac->setEntity('client', $clientId);
+
+// You can also use numeric entity types
+$gac->setEntity('1', $userId);    // '1' = user
+$gac->setEntity('2', $clientId);  // '2' = client
+```
+
+The entity type determines which permissions are loaded from the database (`src/GAC.php:25`).
+
+### Loading Permissions
+
+Retrieve permissions for the current entity:
+
+```php
+// Load from cache (if available) or database
+$permissions = $gac->getPermissions();
+
+// Force database query (bypass cache)
+$permissions = $gac->getPermissions(fromCache: false);
+```
+
+The `getPermissions()` method returns a `Permissions` object (`src/Permissions/Permissions.php:7`).
+
+### Checking Module Access
+
+Use the `has()` method to check if the entity can access a module:
+
+```php
+$permissions = $gac->getPermissions();
+
+// Check if user has access to 'users' module
+if ($permissions->has('users')) {
+    echo "User can access the users module";
+} else {
+    echo "Access denied";
+}
+
+// Check multiple modules
+if ($permissions->has('users') && $permissions->has('roles')) {
+    echo "User can manage users and roles";
+}
+```
+
+The module code comes from the `gac_module.code` field in your database.
+
+## Getting Permission Details
+
+Retrieve detailed permission information for a module:
+
+```php
+$permissions = $gac->getPermissions();
+$userPermission = $permissions->get('users');
+
+if ($userPermission === null) {
+    echo "No access to users module";
+} else {
+    // Permission object is available
+    echo "Module: " . $userPermission->getModuleCode();
+    echo "Permission ID: " . $userPermission->getId();
+    echo "Access Level: " . $userPermission->getLevel();
+    echo "Features: " . implode(', ', $userPermission->getFeature());
+}
+```
+
+The `get()` method returns a `Permission` object (`src/Permissions/Permission.php:5`) or `null`.
+
+## Feature-based Permissions
+
+GAC supports granular feature permissions: Create, Read, Update, Delete, Trash, and Development mode.
+
+### Available Features
+
+From `src/Permissions/Permission.php:12`:
+
+```php
+protected $featureKeys = [
+    'create' => '0',
+    'read'   => '1', 
+    'update' => '2',
+    'delete' => '3',
+    'trash'  => '4',
+    'dev'    => '5'
+];
+```
+
+These map to the `feature` SET field in `gac_module_access` table.
+
+### Checking Specific Features
+
+```php
+$permissions = $gac->getPermissions();
+$userPermission = $permissions->get('users');
+
+if ($userPermission === null) {
+    abort(403);
+}
+
+// Check single feature
+if ($userPermission->hasFeature('create')) {
+    echo "<button>Add New User</button>";
+}
+
+if ($userPermission->hasFeature('update')) {
+    echo "<button>Edit User</button>";
+}
+
+if ($userPermission->hasFeature('delete')) {
+    echo "<button>Delete User</button>";
+}
+
+// Check trash access (works with read, update, delete)
+if ($userPermission->hasFeature('trash')) {
+    echo "<a href='/users/trash'>View Deleted Users</a>";
+}
+```
+
+### Checking Multiple Features
+
+Require multiple features at once:
+
+```php
+$userPermission = $permissions->get('users');
+
+// User must have both update AND delete features
+if ($userPermission && $userPermission->hasFeature(['update', 'delete'])) {
+    echo "<button>Bulk Delete</button>";
+}
+
+// Check with numeric codes
+if ($userPermission && $userPermission->hasFeature(['0', '1', '2'])) {
+    // Has create, read, and update
+    echo "Full access to manage users";
+}
+```
+
+The `hasFeature()` method (`src/Permissions/Permission.php:54`) returns `true` only if ALL specified features are granted.
+
+## Access Levels
+
+Permissions have three levels defined in the `gac_module_access.level` field:
+
+- `0`: Low (restricted access)
+- `1`: Normal (standard access)
+- `2`: High (full access)
+
+```php
+$userPermission = $permissions->get('users');
+
+if ($userPermission) {
+    $level = $userPermission->getLevel();
+    
+    switch ($level) {
+        case 0:
+            echo "Low access: Can only view own records";
+            break;
+        case 1:
+            echo "Normal access: Can view and edit records";
+            break;
+        case 2:
+            echo "High access: Full administrative access";
+            break;
+    }
+}
+```
+
+You can use access levels to implement row-level security or data filtering:
+
+```php
+$userPermission = $permissions->get('users');
+
+if ($userPermission->getLevel() === 0) {
+    // Low level: Only show own records
+    $query = "SELECT * FROM users WHERE id = {$currentUserId}";
+} elseif ($userPermission->getLevel() === 1) {
+    // Normal level: Show department records
+    $query = "SELECT * FROM users WHERE department_id = {$userDepartmentId}";
+} else {
+    // High level: Show all records
+    $query = "SELECT * FROM users";
+}
+```
+
+## Development Mode Access
+
+Modules marked as "in development" (`gac_module.is_developing = '1'`) require the special `dev` feature:
+
+```php
+$modulePermission = $permissions->get('new_beta_feature');
+
+// Check if module is in development mode
+if ($modulePermission && $modulePermission->moduleIsDeveloping()) {
+    // Verify user has dev access
+    if (!$modulePermission->hasFeature('dev')) {
+        echo "This feature is under development and not available yet.";
+        exit;
+    }
+}
+```
+
+From `src/Permissions/Permission.php:43`:
+
+```php
+public function moduleIsDeveloping(): bool {
+    return $this->module_is_developing == '1';
+}
+```
+
+## Practical Examples
+
+### Controller Permission Check
+
+```php
+class UserController {
+    private GAC $gac;
+    
+    public function __construct(GAC $gac) {
+        $this->gac = $gac;
+        $this->gac->setEntity('user', $_SESSION['user_id']);
+    }
+    
+    public function index() {
+        $permissions = $this->gac->getPermissions();
+        $userPerm = $permissions->get('users');
+        
+        if (!$userPerm || !$userPerm->hasFeature('read')) {
+            http_response_code(403);
+            echo "You don't have permission to view users.";
+            return;
+        }
+        
+        // User has read access, show the list
+        $users = $this->getUserList();
+        require 'views/users/index.php';
+    }
+    
+    public function create() {
+        $permissions = $this->gac->getPermissions();
+        $userPerm = $permissions->get('users');
+        
+        if (!$userPerm || !$userPerm->hasFeature('create')) {
+            http_response_code(403);
+            echo "You don't have permission to create users.";
+            return;
+        }
+        
+        // Handle user creation
+        require 'views/users/create.php';
+    }
+    
+    public function update($userId) {
+        $permissions = $this->gac->getPermissions();
+        $userPerm = $permissions->get('users');
+        
+        if (!$userPerm || !$userPerm->hasFeature('update')) {
+            http_response_code(403);
+            echo "You don't have permission to update users.";
+            return;
+        }
+        
+        // Handle user update
+        require 'views/users/edit.php';
+    }
+}
+```
+
+### Middleware Example
+
+```php
+class PermissionMiddleware {
+    private GAC $gac;
+    
+    public function __construct(GAC $gac) {
+        $this->gac = $gac;
+    }
+    
+    public function handle($request, $next, $moduleCode, ...$features) {
+        // Set current user
+        $this->gac->setEntity('user', $request->user()->id);
+        
+        // Get permissions
+        $permissions = $this->gac->getPermissions();
+        $permission = $permissions->get($moduleCode);
+        
+        // Check module access
+        if (!$permission) {
+            abort(403, "Access denied to module: {$moduleCode}");
+        }
+        
+        // Check required features
+        if (!empty($features) && !$permission->hasFeature($features)) {
+            abort(403, "Missing required features: " . implode(', ', $features));
+        }
+        
+        return $next($request);
+    }
+}
+
+// Usage in routes
+$router->get('/users', 'UserController@index')
+    ->middleware('permission:users,read');
+
+$router->post('/users', 'UserController@store')
+    ->middleware('permission:users,create');
+
+$router->put('/users/{id}', 'UserController@update')
+    ->middleware('permission:users,update');
+
+$router->delete('/users/{id}', 'UserController@destroy')
+    ->middleware('permission:users,delete');
+```
+
+### View Conditional Rendering
+
+```php
+<?php
+use DancasDev\GAC\GAC;
+
+$gac = new GAC();
+$gac->setDatabase($pdo);
+$gac->setCache();
+$gac->setEntity('user', $_SESSION['user_id']);
+
+$permissions = $gac->getPermissions();
+?>
+
+<h1>User Management</h1>
+
+<?php if ($permissions->has('users')): ?>
+    <?php $userPerm = $permissions->get('users'); ?>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <?php if ($userPerm->hasFeature('update') || $userPerm->hasFeature('delete')): ?>
+                <th>Actions</th>
+                <?php endif; ?>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($users as $user): ?>
+            <tr>
+                <td><?= htmlspecialchars($user['name']) ?></td>
+                <td><?= htmlspecialchars($user['email']) ?></td>
+                <?php if ($userPerm->hasFeature('update') || $userPerm->hasFeature('delete')): ?>
+                <td>
+                    <?php if ($userPerm->hasFeature('update')): ?>
+                    <a href="/users/<?= $user['id'] ?>/edit">Edit</a>
+                    <?php endif; ?>
+                    
+                    <?php if ($userPerm->hasFeature('delete')): ?>
+                    <a href="/users/<?= $user['id'] ?>/delete" onclick="return confirm('Delete this user?')">Delete</a>
+                    <?php endif; ?>
+                </td>
+                <?php endif; ?>
+            </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+    
+    <?php if ($userPerm->hasFeature('create')): ?>
+    <a href="/users/create" class="btn btn-primary">Add New User</a>
+    <?php endif; ?>
+    
+    <?php if ($userPerm->hasFeature('trash')): ?>
+    <a href="/users/trash" class="btn btn-secondary">View Deleted Users</a>
+    <?php endif; ?>
+<?php else: ?>
+    <p>You don't have permission to view users.</p>
+<?php endif; ?>
+```
+
+### API Permission Check
+
+```php
+class ApiController {
+    private GAC $gac;
+    
+    public function __construct(GAC $gac) {
+        $this->gac = $gac;
+    }
+    
+    public function handleRequest() {
+        // Authenticate API client
+        $clientId = $this->authenticateClient();
+        
+        if (!$clientId) {
+            return $this->jsonResponse(['error' => 'Unauthorized'], 401);
+        }
+        
+        // Set client entity
+        $this->gac->setEntity('client', $clientId);
+        
+        // Check permissions
+        $permissions = $this->gac->getPermissions();
+        
+        if (!$permissions->has('api_users')) {
+            return $this->jsonResponse([
+                'error' => 'Access denied',
+                'message' => 'Your API client does not have access to user endpoints'
+            ], 403);
+        }
+        
+        $apiPerm = $permissions->get('api_users');
+        
+        // Check request method permission
+        $method = $_SERVER['REQUEST_METHOD'];
+        $featureMap = [
+            'GET' => 'read',
+            'POST' => 'create',
+            'PUT' => 'update',
+            'DELETE' => 'delete'
+        ];
+        
+        if (!isset($featureMap[$method]) || !$apiPerm->hasFeature($featureMap[$method])) {
+            return $this->jsonResponse([
+                'error' => 'Method not allowed',
+                'message' => "Your API client cannot perform {$method} operations"
+            ], 405);
+        }
+        
+        // Process request
+        return $this->processRequest();
+    }
+    
+    private function jsonResponse($data, $code = 200) {
+        http_response_code($code);
+        header('Content-Type: application/json');
+        echo json_encode($data);
+        exit;
+    }
+}
+```
+
+## Permission Granularity
+
+GAC implements a priority system for permission granularity (`src/GAC.php:381`):
+
+1. **Personal permissions** (priority: -1) - Direct permissions assigned to user/client
+2. **Inherited permissions from roles** (priority: 0-4) - Based on role priority
+
+The first matching permission wins:
+
+```php
+// Example scenario:
+// User #123 has:
+//   - Personal permission to 'users' module: read only
+//   - Role 'Admin' (priority 0) permission to 'users': full CRUD
+//   - Role 'Manager' (priority 1) permission to 'users': read, update
+
+// Personal permission takes precedence
+// Result: User #123 can only READ users (despite admin role)
+```
+
+This allows you to restrict or expand individual user permissions beyond their role.
+
+## Getting All Permissions
+
+Retrieve the raw permissions array:
+
+```php
+$permissions = $gac->getPermissions();
+$allPermissions = $permissions->getList();
+
+// Structure:
+// [
+//     'users' => ['i' => 1, 'd' => '0', 'f' => ['0','1','2','3'], 'l' => 1],
+//     'roles' => ['i' => 2, 'd' => '0', 'f' => ['1','2'], 'l' => 1],
+//     ...
+// ]
+
+foreach ($allPermissions as $moduleCode => $permData) {
+    echo "Module: {$moduleCode}\n";
+    echo "  Permission ID: {$permData['i']}\n";
+    echo "  Is Developing: {$permData['d']}\n";
+    echo "  Features: " . implode(',', $permData['f']) . "\n";
+    echo "  Level: {$permData['l']}\n";
+}
+```
+
+## Performance Tips
+
+<Tip>
+**Cache permissions for the session**
+
+Load permissions once per session and store them:
+
+```php
+if (!isset($_SESSION['gac_permissions'])) {
+    $gac->setEntity('user', $_SESSION['user_id']);
+    $permissions = $gac->getPermissions();
+    $_SESSION['gac_permissions'] = $permissions->getList();
+} else {
+    $permissions = new Permissions($_SESSION['gac_permissions']);
+}
+```
+
+Remember to clear session permissions when user roles/permissions change.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Managing Restrictions" icon="ban" href="/guides/managing-restrictions">
+    Learn about restrictions and how to apply them
+  </Card>
+  <Card title="Cache Management" icon="bolt" href="/guides/cache-management">
+    Optimize performance with caching strategies
+  </Card>
+</CardGroup>

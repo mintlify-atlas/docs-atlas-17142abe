@@ -1,0 +1,417 @@
+---
+title: 'GAC'
+description: 'Main entry point for the Granular Access Control library'
+---
+
+## Overview
+
+The `GAC` class is the core entry point for the Granular Access Control library. It manages database and cache adapters, entity configuration, and provides methods to retrieve permissions and restrictions.
+
+## Constructor
+
+The GAC class uses a fluent interface pattern for configuration. Initialize without parameters and chain configuration methods.
+
+```php
+$gac = new GAC();
+```
+
+## Configuration Methods
+
+### setDatabase()
+
+Establishes database connection for GAC.
+
+```php
+public function setDatabase(PDO|array|object $params): GAC
+```
+
+<ParamField path="params" type="PDO|array|object" required>
+  Database connection parameters. Can be:
+  - `PDO` instance for direct PDO connection
+  - `array` with connection parameters (passed to DatabaseAdapter)
+  - Custom adapter implementing `DatabaseAdapterInterface`
+</ParamField>
+
+<ResponseField name="return" type="GAC">
+  Returns the GAC instance for method chaining
+</ResponseField>
+
+**Throws:** `DatabaseAdapterException` if invalid adapter provided
+
+```php
+// Using PDO
+$pdo = new PDO('mysql:host=localhost;dbname=mydb', 'user', 'pass');
+$gac->setDatabase($pdo);
+
+// Using array
+$gac->setDatabase([
+    'host' => 'localhost',
+    'database' => 'mydb',
+    'username' => 'user',
+    'password' => 'pass'
+]);
+```
+
+### setCache()
+
+Configures caching for permissions and restrictions.
+
+```php
+public function setCache(
+    string|null $key = null,
+    string|int|null $ttl = null,
+    string|object $dir = null
+): GAC
+```
+
+<ParamField path="key" type="string|null" default="gac">
+  Cache key prefix for stored data
+</ParamField>
+
+<ParamField path="ttl" type="string|int|null" default="1800">
+  Time to live in seconds (default: 30 minutes)
+</ParamField>
+
+<ParamField path="dir" type="string|object" default="__DIR__ . '/writable'">
+  Cache directory path or custom adapter implementing `CacheAdapterInterface`
+</ParamField>
+
+<ResponseField name="return" type="GAC">
+  Returns the GAC instance for method chaining
+</ResponseField>
+
+**Throws:** `CacheAdapterException` if invalid adapter provided
+
+```php
+// Using default file cache
+$gac->setCache('my_app', 3600, '/var/cache/gac');
+
+// Using custom adapter
+$redisAdapter = new RedisCacheAdapter($redisClient);
+$gac->setCache('my_app', 3600, $redisAdapter);
+```
+
+### setEntity()
+
+Sets the entity (user or client) for permission/restriction queries.
+
+```php
+public function setEntity(string $entityType, string|int $entityId): GAC
+```
+
+<ParamField path="entityType" type="string" required>
+  Entity type: `'user'`, `'client'`, or numeric type key (`'1'`, `'2'`)
+</ParamField>
+
+<ParamField path="entityId" type="string|int" required>
+  Unique identifier for the entity
+</ParamField>
+
+<ResponseField name="return" type="GAC">
+  Returns the GAC instance for method chaining
+</ResponseField>
+
+```php
+// Set user entity
+$gac->setEntity('user', 123);
+
+// Set client entity
+$gac->setEntity('client', 'abc-456');
+```
+
+### setCacheTtl()
+
+Sets the cache time-to-live value.
+
+```php
+public function setCacheTtl(int $ttl): GAC
+```
+
+<ParamField path="ttl" type="int" required>
+  Cache lifetime in seconds
+</ParamField>
+
+<ResponseField name="return" type="GAC">
+  Returns the GAC instance for method chaining
+</ResponseField>
+
+```php
+$gac->setCacheTtl(7200); // 2 hours
+```
+
+### setCacheKey()
+
+Sets the cache key prefix.
+
+```php
+public function setCacheKey(string $prefix): GAC
+```
+
+<ParamField path="prefix" type="string" required>
+  Prefix for all cache keys
+</ParamField>
+
+<ResponseField name="return" type="GAC">
+  Returns the GAC instance for method chaining
+</ResponseField>
+
+```php
+$gac->setCacheKey('app_v2');
+```
+
+## Data Retrieval Methods
+
+### getPermissions()
+
+Retrieves permissions for the configured entity.
+
+```php
+public function getPermissions(bool $fromCache = true): Permissions
+```
+
+<ParamField path="fromCache" type="bool" default="true">
+  Whether to attempt loading from cache before querying database
+</ParamField>
+
+<ResponseField name="return" type="Permissions">
+  Permissions instance containing all module access permissions
+</ResponseField>
+
+**Throws:** `Exception` if entity type and ID not set
+
+```php
+$permissions = $gac->setEntity('user', 123)->getPermissions();
+
+if ($permissions->has('invoices')) {
+    $invoice = $permissions->get('invoices');
+    if ($invoice->hasFeature('create')) {
+        // User can create invoices
+    }
+}
+```
+
+### getRestrictions()
+
+Retrieves restrictions for the configured entity.
+
+```php
+public function getRestrictions(bool $fromCache = true): Restrictions
+```
+
+<ParamField path="fromCache" type="bool" default="true">
+  Whether to attempt loading from cache before querying database
+</ParamField>
+
+<ResponseField name="return" type="Restrictions">
+  Restrictions instance containing all active restrictions
+</ResponseField>
+
+**Throws:** `Exception` if entity type and ID not set
+
+```php
+$restrictions = $gac->setEntity('user', 123)->getRestrictions();
+
+if ($restrictions->has('by_date')) {
+    $dateRestriction = $restrictions->get('by_date');
+    $isAllowed = $dateRestriction->run(['date' => time()]);
+}
+```
+
+## Cache Management Methods
+
+### clearCache()
+
+Clears cached permissions and restrictions for the current entity.
+
+```php
+public function clearCache(bool $includeGlobal = false): bool
+```
+
+<ParamField path="includeGlobal" type="bool" default="false">
+  Whether to also clear global restrictions cache
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` on success, `false` on failure
+</ResponseField>
+
+**Throws:** `CacheAdapterException` if cache adapter not set
+
+```php
+// Clear user's cache
+$gac->setEntity('user', 123)->clearCache();
+
+// Clear including global restrictions
+$gac->setEntity('user', 123)->clearCache(true);
+```
+
+### purgePermissionsBy()
+
+Purges permissions cache by entity criteria.
+
+```php
+public function purgePermissionsBy(string $entityType, array $entityIds = []): bool
+```
+
+<ParamField path="entityType" type="string" required>
+  Entity type: `'user'`, `'client'`, `'role'`, or `'global'`
+</ParamField>
+
+<ParamField path="entityIds" type="array" default="[]">
+  Array of entity IDs to purge. Required unless `entityType` is `'global'`
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` on success, `false` if no IDs provided for non-global purge
+</ResponseField>
+
+```php
+// Purge specific users
+$gac->purgePermissionsBy('user', [123, 456, 789]);
+
+// Purge all users with a specific role
+$gac->purgePermissionsBy('role', [5]);
+
+// Purge all entities
+$gac->purgePermissionsBy('global');
+```
+
+### purgeRestrictionsBy()
+
+Purges restrictions cache by entity criteria.
+
+```php
+public function purgeRestrictionsBy(string $entityType, array $entityIds = []): bool
+```
+
+<ParamField path="entityType" type="string" required>
+  Entity type: `'user'`, `'client'`, `'role'`, or `'global'`
+</ParamField>
+
+<ParamField path="entityIds" type="array" default="[]">
+  Array of entity IDs to purge. Required unless `entityType` is `'global'`
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` on success, `false` if no IDs provided for non-global purge
+</ResponseField>
+
+```php
+// Purge specific clients
+$gac->purgeRestrictionsBy('client', ['abc-123', 'def-456']);
+
+// Purge all clients with a specific role
+$gac->purgeRestrictionsBy('role', [3, 4]);
+```
+
+## Getter Methods
+
+### getEntityType()
+
+Returns the configured entity type.
+
+```php
+public function getEntityType(): string
+```
+
+<ResponseField name="return" type="string">
+  The entity type key (`'1'` for user, `'2'` for client)
+</ResponseField>
+
+### getEntityId()
+
+Returns the configured entity ID.
+
+```php
+public function getEntityId(): string|int
+```
+
+<ResponseField name="return" type="string|int">
+  The entity identifier
+</ResponseField>
+
+### getCacheKey()
+
+Generates cache key for a given type.
+
+```php
+public function getCacheKey(string $type): string
+```
+
+<ParamField path="type" type="string" required>
+  Type of cache: `'permissions'`, `'restrictions'`, or `'restrictions_global'`
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Generated cache key
+</ResponseField>
+
+### getEntityRoleData()
+
+Retrieves role data for the current entity.
+
+```php
+public function getEntityRoleData(bool $reset = false): array
+```
+
+<ParamField path="reset" type="bool" default="false">
+  Force reload from database
+</ParamField>
+
+<ResponseField name="return" type="array">
+  Array with `'list'` (role IDs) and `'priority'` (role priorities) keys
+</ResponseField>
+
+## Complete Usage Example
+
+```php
+use DancasDev\GAC\GAC;
+
+// Initialize and configure
+$gac = new GAC();
+$gac->setDatabase($pdo)
+    ->setCache('my_app', 3600)
+    ->setEntity('user', 123);
+
+// Get and check permissions
+$permissions = $gac->getPermissions();
+if ($permissions->has('products')) {
+    $product = $permissions->get('products');
+    
+    if ($product->hasFeature(['read', 'update'])) {
+        // User can read and update products
+        echo "Access level: " . $product->getLevel();
+    }
+}
+
+// Get and validate restrictions
+$restrictions = $gac->getRestrictions();
+if ($restrictions->has('by_date')) {
+    $dateRestriction = $restrictions->get('by_date');
+    $canAccess = $dateRestriction->run(['date' => time()]);
+    
+    if (!$canAccess) {
+        echo "Access denied by date restriction";
+    }
+}
+
+// Clear cache when permissions change
+$gac->clearCache();
+```
+
+## Public Properties
+
+<ResponseField name="databaseAdapter" type="DatabaseAdapter|object">
+  The configured database adapter instance
+</ResponseField>
+
+<ResponseField name="cacheAdapter" type="CacheAdapter|object">
+  The configured cache adapter instance
+</ResponseField>
+
+## See Also
+
+- [Permissions](/api/permissions) - Working with permission collections
+- [Permission](/api/permission) - Individual permission details
+- [Restrictions](/api/restrictions) - Working with restriction collections
+- [Restriction](/api/restriction) - Base restriction class

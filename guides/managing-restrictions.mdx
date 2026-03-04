@@ -1,0 +1,684 @@
+---
+title: Managing Restrictions
+description: Working with restrictions to control access based on custom rules
+icon: ban
+---
+
+## Overview
+
+Restrictions allow you to limit access based on custom criteria beyond simple permissions. GAC includes built-in restrictions for date ranges and entity filtering, with support for custom restriction types.
+
+## Understanding Restrictions
+
+Restrictions are organized into:
+
+1. **Categories** - Broad restriction types (e.g., `by_date`, `by_branch`)
+2. **Methods** - Specific rules within a category (e.g., `allow`, `deny`, `in_range`)
+3. **Data** - JSON configuration for the restriction
+
+### Restriction Tables
+
+```sql
+-- Categories: Types of restrictions
+CREATE TABLE `gac_restriction_category` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(60) NOT NULL,
+  `code` varchar(30) NOT NULL,
+  `description` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code` (`code`)
+);
+
+-- Methods: Specific rules within categories
+CREATE TABLE `gac_restriction_method` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `restriction_category_id` int NOT NULL,
+  `name` varchar(60) NOT NULL,
+  `code` varchar(30) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `code_unique` (`restriction_category_id`,`code`),
+  FOREIGN KEY (`restriction_category_id`) REFERENCES `gac_restriction_category` (`id`)
+);
+
+-- Applied restrictions
+CREATE TABLE `gac_restriction` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `entity_type` enum('0','1','2','3') NOT NULL COMMENT '0=Role, 1=User, 2=Client, 3=All',
+  `entity_id` int NOT NULL,
+  `restriction_method_id` int NOT NULL,
+  `data` text NOT NULL COMMENT 'JSON configuration',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `restriction_unique` (`entity_type`,`entity_id`,`restriction_method_id`)
+);
+```
+
+## Built-in Restrictions
+
+GAC includes two restriction categories with six methods.
+
+### Entity Restrictions (by_branch)
+
+Control access to specific entities like branches, departments, or locations.
+
+<AccordionGroup>
+  <Accordion title="Allow Method - Whitelist">
+    Only allow access to specific entities.
+
+    **Database Entry:**
+    ```sql
+    INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+    VALUES (
+        '1',  -- User
+        123,  -- User ID
+        2,    -- Method: allow (from gac_restriction_method)
+        '{"l": ["5", "12", "18"]}',  -- Allowed branch IDs
+        UNIX_TIMESTAMP()
+    );
+    ```
+
+    **Code Implementation:**
+    ```php
+    $restrictions = $gac->getRestrictions();
+    $branchRestriction = $restrictions->get('by_branch');
+
+    if ($branchRestriction) {
+        $isAllowed = $branchRestriction->run([
+            'entity' => '5'  // Checking branch ID 5
+        ]);
+        
+        if (!$isAllowed) {
+            echo "You don't have access to this branch.";
+        }
+    }
+    ```
+
+    The user can ONLY access branches 5, 12, and 18.
+  </Accordion>
+
+  <Accordion title="Deny Method - Blacklist">
+    Deny access to specific entities (allow all others).
+
+    **Database Entry:**
+    ```sql
+    INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+    VALUES (
+        '1',  -- User
+        456,  -- User ID
+        1,    -- Method: deny
+        '{"l": ["3", "7"]}',  -- Denied branch IDs
+        UNIX_TIMESTAMP()
+    );
+    ```
+
+    **Code Implementation:**
+    ```php
+    $branchRestriction = $restrictions->get('by_branch');
+
+    if ($branchRestriction) {
+        $isAllowed = $branchRestriction->run([
+            'entity' => '7'  // Checking branch ID 7
+        ]);
+        
+        if (!$isAllowed) {
+            echo "This branch is restricted for you.";
+        }
+    }
+    ```
+
+    The user can access all branches EXCEPT 3 and 7.
+  </Accordion>
+</AccordionGroup>
+
+### Date Restrictions (by_date)
+
+Control access based on time periods.
+
+<AccordionGroup>
+  <Accordion title="In Range Method">
+    Allow access only within a date range.
+
+    **Database Entry:**
+    ```sql
+    INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+    VALUES (
+        '0',  -- Role
+        5,    -- Role ID
+        3,    -- Method: in_range
+        '{"sd": "2024-01-01", "ed": "2024-12-31"}',  -- Start and end dates
+        UNIX_TIMESTAMP()
+    );
+    ```
+
+    **Code Implementation:**
+    ```php
+    $restrictions = $gac->getRestrictions();
+    $dateRestriction = $restrictions->get('by_date');
+
+    if ($dateRestriction) {
+        $isAllowed = $dateRestriction->run([
+            'date' => time()  // Current timestamp
+        ]);
+        
+        if (!$isAllowed) {
+            echo "Access is only available between Jan 1 and Dec 31, 2024.";
+        }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Out Range Method">
+    Allow access outside a date range.
+
+    **Database Entry:**
+    ```sql
+    INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+    VALUES (
+        '1',  -- User
+        789,
+        4,    -- Method: out_range
+        '{"sd": "2024-07-01", "ed": "2024-07-31"}',
+        UNIX_TIMESTAMP()
+    );
+    ```
+
+    Access is blocked during July 2024 (vacation period).
+  </Accordion>
+
+  <Accordion title="Before Method">
+    Allow access before a specific date.
+
+    **Database Entry:**
+    ```sql
+    INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+    VALUES (
+        '2',  -- Client
+        10,
+        5,    -- Method: before
+        '{"d": "2024-12-31"}',
+        UNIX_TIMESTAMP()
+    );
+    ```
+
+    **With Date Wildcards:**
+    ```sql
+    -- Before end of current year
+    '{"d": "%Y-12-31"}'
+    
+    -- Before end of current month
+    '{"d": "%Y-%M-31"}'
+    ```
+
+    Wildcards from `src/Restrictions/ByDate.php:147`:
+    - `%Y` - Current year
+    - `%M` - Current month
+    - `%D` - Current day
+  </Accordion>
+
+  <Accordion title="After Method">
+    Allow access after a specific date.
+
+    **Database Entry:**
+    ```sql
+    INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+    VALUES (
+        '1',  -- User
+        999,
+        6,    -- Method: after
+        '{"d": "2024-06-01"}',
+        UNIX_TIMESTAMP()
+    );
+    ```
+
+    User can only access after June 1, 2024.
+  </Accordion>
+</AccordionGroup>
+
+## Loading Restrictions
+
+### Basic Loading
+
+```php
+use DancasDev\GAC\GAC;
+
+$gac = new GAC();
+$gac->setDatabase($pdo);
+$gac->setCache();
+$gac->setEntity('user', $userId);
+
+// Load restrictions (from cache or database)
+$restrictions = $gac->getRestrictions();
+
+// Force database query
+$restrictions = $gac->getRestrictions(fromCache: false);
+```
+
+### Restriction Types
+
+GAC loads two types of restrictions:
+
+1. **Personal/Role restrictions** - Specific to the entity and their roles
+2. **Global restrictions** - Apply to all entities (entity_type = '3')
+
+From `src/GAC.php:165`:
+
+```php
+public function getRestrictions(bool $fromCache = true): Restrictions {
+    $restrictionsP = null;  // Personal
+    $restrictionsG = null;  // Global
+    
+    if ($fromCache) {
+        $restrictionsG = $this->getFromCache('restrictions_global');
+        $restrictionsP = $this->getFromCache('restrictions');
+    }
+    
+    if (!is_array($restrictionsG)) {
+        $restrictionsG = $this->getRestrictionsFromDB(true);
+        $this->saveToCache('restrictions_global', $restrictionsG);
+    }
+    if (!is_array($restrictionsP)) {
+        $restrictionsP = $this->getRestrictionsFromDB(false);
+        $this->saveToCache('restrictions', $restrictionsP);
+    }
+    
+    $restrictions = array_merge_recursive($restrictionsG, $restrictionsP);
+    return new Restrictions($restrictions);
+}
+```
+
+## Checking Restrictions
+
+### Check if Restriction Exists
+
+```php
+$restrictions = $gac->getRestrictions();
+
+// Check if entity has branch restrictions
+if ($restrictions->has('by_branch')) {
+    echo "User has branch restrictions";
+}
+
+// Check for date restrictions
+if ($restrictions->has('by_date')) {
+    echo "User has date restrictions";
+}
+```
+
+### Get and Validate Restrictions
+
+```php
+$restrictions = $gac->getRestrictions();
+
+// Get branch restriction handler
+$branchRestriction = $restrictions->get('by_branch');
+
+if ($branchRestriction === null) {
+    // No branch restrictions for this user
+    $branchId = $_GET['branch_id'];
+} else {
+    // Validate branch access
+    $branchId = $_GET['branch_id'];
+    $isAllowed = $branchRestriction->run(['entity' => $branchId]);
+    
+    if (!$isAllowed) {
+        http_response_code(403);
+        die('You do not have access to this branch.');
+    }
+}
+
+// Proceed with branch-specific operations
+$data = $this->getBranchData($branchId);
+```
+
+### Multiple Restriction Validation
+
+```php
+$restrictions = $gac->getRestrictions();
+
+// Validate both branch and date
+$branchRestriction = $restrictions->get('by_branch');
+$dateRestriction = $restrictions->get('by_date');
+
+$errors = [];
+
+if ($branchRestriction && !$branchRestriction->run(['entity' => $branchId])) {
+    $errors[] = 'Branch access denied';
+}
+
+if ($dateRestriction && !$dateRestriction->run(['date' => time()])) {
+    $errors[] = 'Access not allowed at this time';
+}
+
+if (!empty($errors)) {
+    http_response_code(403);
+    echo implode('. ', $errors);
+    exit;
+}
+```
+
+## Practical Examples
+
+### Multi-branch Application
+
+```php
+class ReportController {
+    private GAC $gac;
+    
+    public function __construct(GAC $gac) {
+        $this->gac = $gac;
+    }
+    
+    public function viewReport($reportId) {
+        // Set user entity
+        $this->gac->setEntity('user', $_SESSION['user_id']);
+        
+        // Get report data
+        $report = $this->getReport($reportId);
+        $reportBranchId = $report['branch_id'];
+        
+        // Check branch restriction
+        $restrictions = $this->gac->getRestrictions();
+        $branchRestriction = $restrictions->get('by_branch');
+        
+        if ($branchRestriction) {
+            $canAccess = $branchRestriction->run(['entity' => $reportBranchId]);
+            
+            if (!$canAccess) {
+                $error = $branchRestriction->getError();
+                error_log("Branch restriction failed: " . json_encode($error));
+                
+                return $this->errorResponse(
+                    'You do not have access to reports from this branch.',
+                    403
+                );
+            }
+        }
+        
+        return $this->successResponse($report);
+    }
+    
+    public function listReports() {
+        $this->gac->setEntity('user', $_SESSION['user_id']);
+        $restrictions = $this->gac->getRestrictions();
+        $branchRestriction = $restrictions->get('by_branch');
+        
+        if ($branchRestriction) {
+            // Get allowed branches from restriction data
+            $restrictionData = $branchRestriction->getList();
+            
+            // Assuming 'allow' method is used
+            if (isset($restrictionData['allow'])) {
+                $allowedBranches = [];
+                foreach ($restrictionData['allow'] as $restriction) {
+                    if (isset($restriction['d']['l'])) {
+                        $allowedBranches = $restriction['d']['l'];
+                        break;
+                    }
+                }
+                
+                // Filter reports by allowed branches
+                $reports = $this->getReports(['branch_id' => $allowedBranches]);
+            } else {
+                $reports = $this->getReports();
+            }
+        } else {
+            // No restrictions, show all reports
+            $reports = $this->getReports();
+        }
+        
+        return $this->successResponse($reports);
+    }
+}
+```
+
+### Time-limited Access
+
+```php
+class TemporaryAccessController {
+    private GAC $gac;
+    
+    public function __construct(GAC $gac) {
+        $this->gac = $gac;
+    }
+    
+    public function accessResource() {
+        // Set client entity (API client)
+        $this->gac->setEntity('client', $this->getAuthenticatedClientId());
+        
+        // Check date restriction
+        $restrictions = $this->gac->getRestrictions();
+        $dateRestriction = $restrictions->get('by_date');
+        
+        if ($dateRestriction) {
+            $currentTime = time();
+            $isAllowed = $dateRestriction->run(['date' => $currentTime]);
+            
+            if (!$isAllowed) {
+                $error = $dateRestriction->getError();
+                $method = $error['method'] ?? 'unknown';
+                
+                $message = match($method) {
+                    'before' => 'Your access period has expired.',
+                    'after' => 'Your access period has not started yet.',
+                    'in_range' => 'Access is only available during the specified period.',
+                    'out_range' => 'Access is blocked during the specified period.',
+                    default => 'Access denied due to time restrictions.'
+                };
+                
+                return $this->jsonResponse(['error' => $message], 403);
+            }
+        }
+        
+        // Proceed with resource access
+        return $this->jsonResponse(['data' => $this->getResourceData()]);
+    }
+}
+```
+
+### Global Restrictions
+
+```php
+// Database: Global restriction for all entities
+INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+VALUES (
+    '3',  -- Global (all entities)
+    0,    -- ID is irrelevant for global
+    3,    -- Method: in_range
+    '{"sd": "2024-01-01 09:00:00", "ed": "2024-12-31 17:00:00"}',
+    UNIX_TIMESTAMP()
+);
+```
+
+```php
+// Application middleware
+class BusinessHoursMiddleware {
+    private GAC $gac;
+    
+    public function handle($request, $next) {
+        // Global restrictions don't require entity to be set
+        // but we set it anyway for consistency
+        $this->gac->setEntity('user', $request->user()->id ?? 0);
+        
+        $restrictions = $this->gac->getRestrictions();
+        $dateRestriction = $restrictions->get('by_date');
+        
+        if ($dateRestriction) {
+            $isAllowed = $dateRestriction->run(['date' => time()]);
+            
+            if (!$isAllowed) {
+                return response()->json([
+                    'error' => 'System is only available during business hours (9 AM - 5 PM).'
+                ], 403);
+            }
+        }
+        
+        return $next($request);
+    }
+}
+```
+
+## Restriction Priority
+
+Similar to permissions, restrictions have a priority system (`src/GAC.php:475`):
+
+1. **Personal restrictions** (priority: -1) - Direct to user/client
+2. **Role restrictions** (priority: 0-4) - Inherited from roles
+3. **Global restrictions** - Always checked
+
+```php
+// Granularity example:
+// User has:
+//   - Personal: Allow branches [1, 2, 3]
+//   - Role Admin: Allow branches [1, 2, 3, 4, 5]
+// 
+// Result: User can only access branches 1, 2, 3 (personal takes precedence)
+```
+
+From `src/GAC.php:503`:
+
+```php
+// Descartar duplicados por granularidad
+$reservationList = []; // una sola reserva por categoría
+foreach ($response as $restriction) {
+    $entityKey = $restriction['entity_type'] . '_' . $restriction['entity_id'];
+    $reservationList[$restriction['category_code']] ??= $entityKey;
+    
+    // Si ya existe una reserva y no es la misma, descartar
+    if ($reservationList[$restriction['category_code']] !== $entityKey) {
+        continue;
+    }
+    
+    // Almacenar restricción
+    // ...
+}
+```
+
+## Getting Error Details
+
+When a restriction fails, you can get details:
+
+```php
+$branchRestriction = $restrictions->get('by_branch');
+$isAllowed = $branchRestriction->run(['entity' => '99']);
+
+if (!$isAllowed) {
+    $error = $branchRestriction->getError();
+    
+    // Error structure:
+    // [
+    //   'method' => 'allow',
+    //   'restriction' => [
+    //     'i' => 5,           // Restriction ID
+    //     'd' => ['l' => ['1', '2', '3']]  // Restriction data
+    //   ]
+    // ]
+    
+    error_log("Restriction failed: Method {$error['method']}");
+    error_log("Restriction ID: {$error['restriction']['i']}");
+    error_log("Allowed entities: " . implode(', ', $error['restriction']['d']['l']));
+}
+```
+
+From `src/Restrictions/Restriction.php:40`:
+
+```php
+public function run(array $externalData): bool {
+    $this->error = [];
+    
+    foreach ($this->list as $method => $restrictions) {
+        foreach ($restrictions as $restriction) {
+            $result = $this->{$this->methods[$method]}($restriction['d'], $externalData);
+            if (!$result) {
+                $this->error = [
+                    'method' => $method,
+                    'restriction' => $restriction,
+                ];
+                return false;
+            }
+        }
+    }
+    
+    return true;
+}
+```
+
+## Custom Restriction Categories
+
+You can add custom restriction types. See [Custom Adapters](/guides/custom-adapters) for creating custom restriction classes.
+
+Example: IP-based restriction
+
+```sql
+-- Add restriction category
+INSERT INTO gac_restriction_category (name, code, created_at)
+VALUES ('By IP Address', 'by_ip', UNIX_TIMESTAMP());
+
+-- Add restriction method
+INSERT INTO gac_restriction_method (restriction_category_id, name, code, created_at)
+VALUES (3, 'Allow IPs', 'allow', UNIX_TIMESTAMP());
+
+-- Apply restriction
+INSERT INTO gac_restriction (entity_type, entity_id, restriction_method_id, data, created_at)
+VALUES (
+    '1',
+    123,
+    7,
+    '{"ips": ["192.168.1.1", "10.0.0.0/8"]}',
+    UNIX_TIMESTAMP()
+);
+```
+
+```php
+// Create custom restriction class
+use DancasDev\GAC\Restrictions\Restriction;
+
+class ByIp extends Restriction {
+    protected array $methods = [
+        'allow' => 'allow',
+        'deny' => 'deny'
+    ];
+    
+    public function allow(array $internalData, array $externalData): bool {
+        if (!isset($internalData['ips']) || !isset($externalData['ip'])) {
+            return false;
+        }
+        
+        $userIp = $externalData['ip'];
+        foreach ($internalData['ips'] as $allowedIp) {
+            if ($this->ipMatch($userIp, $allowedIp)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    private function ipMatch($ip, $range) {
+        // Implement IP matching logic (CIDR, exact, etc.)
+        return $ip === $range; // Simplified
+    }
+}
+
+// Register custom restriction
+use DancasDev\GAC\Restrictions\Restrictions;
+
+Restrictions::register('by_ip', ByIp::class);
+
+// Use it
+$restrictions = $gac->getRestrictions();
+$ipRestriction = $restrictions->get('by_ip');
+
+if ($ipRestriction) {
+    $isAllowed = $ipRestriction->run(['ip' => $_SERVER['REMOTE_ADDR']]);
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Cache Management" icon="bolt" href="/guides/cache-management">
+    Optimize performance with cache strategies
+  </Card>
+  <Card title="Custom Adapters" icon="code" href="/guides/custom-adapters">
+    Create custom restriction types and adapters
+  </Card>
+</CardGroup>

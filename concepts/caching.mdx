@@ -1,0 +1,708 @@
+---
+title: Caching System
+description: Understanding GAC's caching layer, including cache adapters, TTL configuration, cache key structure, and purging strategies
+---
+
+## Overview
+
+GAC includes a built-in caching system to improve performance by reducing database queries. The caching layer supports multiple adapters, configurable TTL (Time To Live), and granular purging strategies.
+
+## Cache Architecture
+
+The caching system consists of:
+
+1. **Cache Adapter Interface**: Defines the contract for cache implementations
+2. **Default File-Based Adapter**: Built-in filesystem cache
+3. **Custom Adapters**: Support for Redis, Memcached, or other backends
+4. **Automatic Cache Management**: Transparent caching of permissions and restrictions
+
+## Setting Up Cache
+
+### Basic Configuration
+
+```php
+// Setup cache (GAC.php:112-130)
+public function setCache(
+    string|null $key = null,   // Cache key prefix
+    string|int|null $ttl = null,   // Time to live in seconds
+    string|object $dir = null      // Directory or adapter
+) : GAC {
+    $this->cachekey = $key ?? 'gac';
+    $this->cacheTtl = (int) ($ttl ?? 1800); // 30 minutes default
+    $dir ??= __DIR__ . '/writable';
+    
+    if(is_string($dir)) {
+        $this->cacheAdapter = new CacheAdapter($dir);
+    } else {
+        // Validate custom adapter
+        $classImplementList = class_implements($dir);
+        if (!in_array('DancasDev\\GAC\\Adapters\\CacheAdapterInterface', 
+                      $classImplementList)) {
+            throw new CacheAdapterException(
+                'Invalid implementation: The cache adapter must implement CacheAdapterInterface.'
+            );
+        }
+        $this->cacheAdapter = $dir;
+    }
+    
+    return $this;
+}
+```
+
+### Usage Examples
+
+```php
+// Default configuration (30 min TTL, default directory)
+$gac->setCache();
+
+// Custom key prefix and TTL
+$gac->setCache('myapp', 3600); // 1 hour
+
+// Custom directory
+$gac->setCache('myapp', 3600, '/var/cache/gac');
+
+// Custom adapter
+$redisAdapter = new MyRedisAdapter();
+$gac->setCache('myapp', 3600, $redisAdapter);
+```
+
+## Cache Adapter Interface
+
+All cache adapters must implement the `CacheAdapterInterface`:
+
+```php
+// CacheAdapterInterface.php
+interface CacheAdapterInterface {
+    /**
+     * Get cached value
+     * @return mixed Value or NULL if not found/expired
+     */
+    public function get(string $key): mixed;
+    
+    /**
+     * Save value to cache
+     * @return bool Success status
+     */
+    public function save(string $key, mixed $data, ?int $ttl = 60): bool;
+    
+    /**
+     * Delete specific cache entry
+     * @return bool Success status
+     */
+    public function delete(string $key): bool;
+    
+    /**
+     * Delete entries matching pattern (glob-style)
+     * @return int Number of deleted entries
+     */
+    public function deleteMatching(string $pattern): int;
+    
+    /**
+     * Clear all cache entries
+     * @return bool Success status
+     */
+    public function clean(): bool;
+}
+```
+
+## Default File-Based Adapter
+
+The built-in adapter stores cache as JSON files:
+
+### Directory Setup
+
+```php
+// Set cache directory (CacheAdapter.php:26-40)
+public function setDir(string $cacheDir) : bool {
+    $this->cacheDir = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $cacheDir);
+    
+    if (!is_dir($this->cacheDir)) {
+        $response = mkdir($this->cacheDir, 0775, true);
+    }
+    
+    if (!$response) {
+        throw new CacheAdapterException('Error setting cache directory');
+    }
+    
+    return $response;
+}
+```
+
+### Storage Format
+
+Cache entries are stored as JSON with TTL:
+
+```php
+// Save to cache (CacheAdapter.php:66-84)
+public function save(string $key, $data, int|null $ttl = 60): bool {
+    if (empty($this->cacheDir)) {
+        return false;
+    }
+    
+    $file = $this->cacheDir . DIRECTORY_SEPARATOR . $key;
+    $dataToSave = [
+        't' => empty($ttl) ? null : time() + $ttl,  // Expiration timestamp
+        'v' => $data                                 // Actual data
+    ];
+    
+    try {
+        $dataToSave = json_encode($dataToSave);
+    } catch (\Throwable $th) {
+        return false;
+    }
+    
+    return file_put_contents($file, $dataToSave) !== false;
+}
+```
+
+### Retrieval with TTL Check
+
+```php
+// Get from cache (CacheAdapter.php:42-64)
+public function get(string $key): mixed {
+    if (empty($this->cacheDir)) {
+        return null;
+    }
+    
+    $file = $this->cacheDir . DIRECTORY_SEPARATOR . $key;
+    if (!file_exists($file)) {
+        return null;
+    }
+    
+    try {
+        $data = json_decode(file_get_contents($file), true);
+    } catch (\Throwable $th) {
+        $data = null;
+    }
+    
+    // Check if expired
+    if (empty($data) || (!empty($data['t']) && $data['t'] < time())) {
+        $this->delete($key);  // Auto-cleanup expired entries
+        return null;
+    }
+    
+    return $data['v'] ?? null;
+}
+```
+
+<Note>
+Expired cache entries are automatically deleted when accessed.
+</Note>
+
+## Cache Key Structure
+
+GAC uses a structured naming convention for cache keys:
+
+```php
+// Cache key generation (GAC.php:49-57)
+public function getCacheKey(string $type) : string {
+    if ($type == 'restrictions_global') {
+        // Global restrictions shared across all entities
+        return $this->cachekey . '_r_global';
+    } else {
+        // Entity-specific cache
+        $type = substr($type, 0, 1); // 'p' = permissions, 'r' = restrictions
+        return $this->cachekey . '_' . $type . '_' 
+             . $this->entityType . '_' . $this->entityId;
+    }
+}
+```
+
+### Key Format Examples
+
+```plaintext
+gac_p_1_12345     - Permissions for user 12345
+gac_r_1_12345     - Restrictions for user 12345
+gac_p_2_789       - Permissions for client 789
+gac_r_2_789       - Restrictions for client 789
+gac_r_global      - Global restrictions
+```
+
+**Components**:
+- **Prefix**: `gac` (or custom prefix)
+- **Type**: `p` (permissions) or `r` (restrictions)
+- **Entity Type**: `1` (user), `2` (client)
+- **Entity ID**: Specific entity identifier
+
+## Automatic Cache Usage
+
+### Permissions Caching
+
+```php
+// Get permissions with cache (GAC.php:139-156)
+public function getPermissions(bool $fromCache = true) : Permissions {
+    $type = 'permissions';
+    
+    if (empty($this->entityType) || empty($this->entityId)) {
+        throw new \Exception('Entity type and ID must be set before loading data.');
+    }
+    
+    $permissions = null;
+    if ($fromCache) {
+        // Try to load from cache first
+        $permissions = $this->getFromCache($type);
+    }
+    
+    if (!is_array($permissions)) {
+        // Cache miss - load from database
+        $permissions = $this->getPermissionsFromDB();
+        // Save to cache for next time
+        $this->saveToCache($type, $permissions);
+    }
+    
+    return new Permissions($permissions);
+}
+```
+
+### Restrictions Caching
+
+Restrictions use a two-tier cache strategy:
+
+```php
+// Get restrictions with cache (GAC.php:165-191)
+public function getRestrictions(bool $fromCache = true) : Restrictions {
+    if (empty($this->entityType) || empty($this->entityId)) {
+        throw new \Exception('Entity type and ID must be set before loading data.');
+    }
+    
+    // Try cache for both global and personal
+    $restrictionsP = null;
+    $restrictionsG = null;
+    if ($fromCache) {
+        $restrictionsG = $this->getFromCache('restrictions_global');
+        $restrictionsP = $this->getFromCache('restrictions');
+    }
+    
+    // Load from database if cache miss
+    if (!is_array($restrictionsG)) {
+        $restrictionsG = $this->getRestrictionsFromDB(true);
+        $this->saveToCache('restrictions_global', $restrictionsG);
+    }
+    if (!is_array($restrictionsP)) {
+        $restrictionsP = $this->getRestrictionsFromDB(false);
+        $this->saveToCache('restrictions', $restrictionsP);
+    }
+    
+    // Merge global and personal restrictions
+    $restrictions = array_merge_recursive($restrictionsG, $restrictionsP);
+    return new Restrictions($restrictions);
+}
+```
+
+<Info>
+Global restrictions are cached separately and shared across all entities, reducing redundant database queries.
+</Info>
+
+## Cache Operations
+
+### Force Reload from Database
+
+```php
+// Bypass cache and reload from database
+$permissions = $gac->getPermissions(false);
+$restrictions = $gac->getRestrictions(false);
+```
+
+### Clear Entity Cache
+
+```php
+// Clear cache (GAC.php:202-222)
+public function clearCache(bool $includeGlobal = false) : bool {
+    if (empty($this->cacheAdapter)) {
+        throw new CacheAdapterException('Cache adapter not set.');
+    }
+    
+    // Clear permissions
+    $cacheKey = $this->getCacheKey('permissions');
+    $this->cacheAdapter->delete($cacheKey);
+    
+    // Clear restrictions
+    $cacheKey = $this->getCacheKey('restrictions');
+    $this->cacheAdapter->delete($cacheKey);
+    
+    // Optionally clear global restrictions
+    if ($includeGlobal) {
+        $cacheKey = $this->getCacheKey('restrictions_global');
+        $this->cacheAdapter->delete($cacheKey);
+    }
+    
+    return true;
+}
+```
+
+**Usage**:
+
+```php
+$gac->setEntity('user', 12345);
+
+// Clear user's cache only
+$gac->clearCache();
+
+// Clear user's cache and global restrictions
+$gac->clearCache(true);
+```
+
+## Purging Strategies
+
+GAC provides targeted purging methods for different scenarios:
+
+### Purge by Entity Type
+
+```php
+// Purge permissions (GAC.php:232-234)
+public function purgePermissionsBy(string $entityType, array $entityIds = []) : bool {
+    return $this->purgeCacheBy('permissions', $entityType, $entityIds);
+}
+
+// Purge restrictions (GAC.php:244-246)
+public function purgeRestrictionsBy(string $entityType, array $entityIds = []) : bool {
+    return $this->purgeCacheBy('restrictions', $entityType, $entityIds);
+}
+```
+
+### Purge Implementation
+
+```php
+// Core purge logic (GAC.php:257-297)
+protected function purgeCacheBy(string $type, string $entityType, array $entityIds = []) : bool {
+    if (empty($this->cacheAdapter)) {
+        throw new CacheAdapterException('Cache adapter not set.');
+    }
+    
+    $type = substr($type, 0, 1); // 'p' or 'r'
+    
+    if ($entityType == 'global') {
+        // Purge all cache entries of this type
+        $this->cacheAdapter->deleteMatching($this->cachekey . '_' . $type . '_*');
+    } else {
+        if (empty($entityIds)) {
+            return false;
+        }
+        
+        // Build list of entities to purge
+        $list = [];
+        if ($entityType == 'user') {
+            $list['1'] = $entityIds;
+        } elseif ($entityType == 'client') {
+            $list['2'] = $entityIds;
+        } elseif($entityType == 'role') {
+            // Get all entities with these roles
+            $result = $this->databaseAdapter->getEntitiesByRoles($entityIds);
+            foreach ($result as $record) {
+                $list[$record['entity_type']] ??= [];
+                $list[$record['entity_type']][$record['entity_id']] = $record['entity_id'];
+            }
+        }
+        
+        // Delete cache for each entity
+        foreach ($list as $entityKey => $subList) {
+            foreach ($subList as $entityId) {
+                $entityId = (string) $entityId;
+                $this->cacheAdapter->delete(
+                    $this->cachekey . '_' . $type . '_' . $entityKey . '_' . $entityId
+                );
+            }
+        }
+    }
+    
+    return true;
+}
+```
+
+### Purge Examples
+
+<Tabs>
+  <Tab title="Purge Specific Users">
+    ```php
+    // Purge cache for specific users
+    $gac->purgePermissionsBy('user', [12345, 67890]);
+    $gac->purgeRestrictionsBy('user', [12345, 67890]);
+    
+    // When to use:
+    // - User permissions/restrictions changed
+    // - User roles were modified
+    ```
+  </Tab>
+  
+  <Tab title="Purge by Role">
+    ```php
+    // Purge all entities with specific role(s)
+    $gac->purgePermissionsBy('role', [101, 102]);
+    
+    // When to use:
+    // - Role permissions changed
+    // - Role was assigned/removed from entities
+    // - Bulk updates affecting role members
+    ```
+  </Tab>
+  
+  <Tab title="Purge Clients">
+    ```php
+    // Purge specific client(s)
+    $gac->purgeRestrictionsBy('client', [789]);
+    
+    // When to use:
+    // - Client restrictions changed
+    // - Client configuration updated
+    ```
+  </Tab>
+  
+  <Tab title="Global Purge">
+    ```php
+    // Purge all cached permissions
+    $gac->purgePermissionsBy('global');
+    
+    // When to use:
+    // - System-wide permission changes
+    // - Module structure changed
+    // - After major updates
+    ```
+  </Tab>
+</Tabs>
+
+## Pattern Matching Deletion
+
+The `deleteMatching()` method supports glob patterns:
+
+```php
+// Delete matching (CacheAdapter.php:100-114)
+public function deleteMatching(string $pattern) : int {
+    if (empty($this->cacheDir) || empty($pattern)) {
+        return 0;
+    }
+    
+    $deletedCount = 0;
+    $files = glob($this->cacheDir . DIRECTORY_SEPARATOR . $pattern);
+    foreach ($files as $file) {
+        if (is_file($file) && unlink($file)) {
+            $deletedCount++;
+        }
+    }
+    
+    return $deletedCount;
+}
+```
+
+**Pattern Examples**:
+
+```php
+// Delete all permissions cache
+$adapter->deleteMatching('gac_p_*');
+
+// Delete all cache for user entity type
+$adapter->deleteMatching('gac_*_1_*');
+
+// Delete everything
+$adapter->deleteMatching('gac_*');
+```
+
+## TTL Configuration
+
+Time To Live controls how long cache entries remain valid:
+
+### Setting TTL
+
+```php
+// Set TTL (GAC.php:31-34)
+public function setCacheTtl(int $ttl) : GAC {
+    $this->cacheTtl = $ttl;
+    return $this;
+}
+```
+
+### TTL Values
+
+```php
+// Common TTL configurations
+$gac->setCache('app', 300);    // 5 minutes
+$gac->setCache('app', 1800);   // 30 minutes (default)
+$gac->setCache('app', 3600);   // 1 hour
+$gac->setCache('app', 86400);  // 24 hours
+$gac->setCache('app', null);   // No expiration
+
+// Or set separately
+$gac->setCache();
+$gac->setCacheTtl(7200); // 2 hours
+```
+
+<Warning>
+**TTL Considerations**:
+- Shorter TTL = More database queries, fresher data
+- Longer TTL = Fewer queries, potentially stale data
+- No TTL = Manual invalidation required
+</Warning>
+
+## Custom Cache Adapters
+
+Create custom adapters for different backends:
+
+### Redis Example
+
+```php
+use DancasDev\GAC\Adapters\CacheAdapterInterface;
+
+class RedisCacheAdapter implements CacheAdapterInterface {
+    private $redis;
+    
+    public function __construct(\Redis $redis) {
+        $this->redis = $redis;
+    }
+    
+    public function get(string $key): mixed {
+        $data = $this->redis->get($key);
+        return $data !== false ? json_decode($data, true) : null;
+    }
+    
+    public function save(string $key, mixed $data, ?int $ttl = 60): bool {
+        $value = json_encode($data);
+        if ($ttl) {
+            return $this->redis->setex($key, $ttl, $value);
+        }
+        return $this->redis->set($key, $value);
+    }
+    
+    public function delete(string $key): bool {
+        return $this->redis->del($key) > 0;
+    }
+    
+    public function deleteMatching(string $pattern): int {
+        $keys = $this->redis->keys($pattern);
+        if (empty($keys)) return 0;
+        return $this->redis->del(...$keys);
+    }
+    
+    public function clean(): bool {
+        return $this->redis->flushDB();
+    }
+}
+
+// Usage
+$redis = new \Redis();
+$redis->connect('127.0.0.1', 6379);
+$adapter = new RedisCacheAdapter($redis);
+
+$gac->setCache('myapp', 3600, $adapter);
+```
+
+### Memcached Example
+
+```php
+class MemcachedAdapter implements CacheAdapterInterface {
+    private $memcached;
+    
+    public function __construct(\Memcached $memcached) {
+        $this->memcached = $memcached;
+    }
+    
+    public function get(string $key): mixed {
+        $data = $this->memcached->get($key);
+        return $data !== false ? $data : null;
+    }
+    
+    public function save(string $key, mixed $data, ?int $ttl = 60): bool {
+        return $this->memcached->set($key, $data, $ttl ?? 0);
+    }
+    
+    public function delete(string $key): bool {
+        return $this->memcached->delete($key);
+    }
+    
+    public function deleteMatching(string $pattern): int {
+        // Note: Memcached doesn't support pattern matching natively
+        // You'd need to maintain a key registry or use getAllKeys()
+        $keys = $this->memcached->getAllKeys();
+        $count = 0;
+        foreach ($keys as $key) {
+            if (fnmatch($pattern, $key)) {
+                $this->memcached->delete($key);
+                $count++;
+            }
+        }
+        return $count;
+    }
+    
+    public function clean(): bool {
+        return $this->memcached->flush();
+    }
+}
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Set Appropriate TTL" icon="clock">
+    Balance between freshness and performance. Start with 30 minutes.
+  </Card>
+  
+  <Card title="Purge on Changes" icon="rotate">
+    Clear cache when permissions/restrictions change in database.
+  </Card>
+  
+  <Card title="Use Global Purge Sparingly" icon="bomb">
+    Purge specific entities when possible to avoid cache stampede.
+  </Card>
+  
+  <Card title="Monitor Cache Size" icon="hard-drive">
+    Regularly clean up expired entries, especially with file-based cache.
+  </Card>
+</CardGroup>
+
+## Performance Tips
+
+<AccordionGroup>
+  <Accordion title="Preload Common Entities">
+    For frequently accessed entities, consider warming the cache:
+    
+    ```php
+    // Warm cache for top users
+    foreach ($topUsers as $userId) {
+        $gac->setEntity('user', $userId);
+        $gac->getPermissions();
+        $gac->getRestrictions();
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Batch Purging">
+    When updating multiple entities, batch purge operations:
+    
+    ```php
+    // Instead of individual purges
+    // $gac->purgePermissionsBy('user', [123]);
+    // $gac->purgePermissionsBy('user', [456]);
+    
+    // Batch them
+    $gac->purgePermissionsBy('user', [123, 456, 789]);
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Redis/Memcached in Production">
+    File-based cache works well for development, but use memory-based cache in production:
+    
+    ```php
+    // Development
+    $gac->setCache('dev', 300, '/tmp/cache');
+    
+    // Production
+    $redis = new \Redis();
+    $redis->connect('redis-server', 6379);
+    $gac->setCache('prod', 3600, new RedisCacheAdapter($redis));
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Permissions" href="/concepts/permissions" icon="key">
+    How permissions are cached
+  </Card>
+  
+  <Card title="Restrictions" href="/concepts/restrictions" icon="ban">
+    Restriction cache strategy
+  </Card>
+  
+  <Card title="Roles & Entities" href="/concepts/roles-entities" icon="users">
+    Entity-based cache keys
+  </Card>
+</CardGroup>

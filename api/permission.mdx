@@ -1,0 +1,378 @@
+---
+title: 'Permission'
+description: 'Individual module permission with feature and level access control'
+---
+
+## Overview
+
+The `Permission` class represents a single module permission for an entity. It provides methods to inspect permission details including feature access (create, read, update, delete) and permission levels.
+
+## Constructor
+
+Creates a Permission instance from permission data.
+
+```php
+public function __construct(array $data)
+```
+
+<ParamField path="data" type="array" required>
+  Permission data array containing:
+  - `i` (int): Permission ID
+  - `f` (array): Feature codes array
+  - `l` (int): Permission level
+  - `m` (string): Module code
+  - `d` (string): Module developing status
+</ParamField>
+
+<Note>
+  Typically, you don't instantiate this directly. Use `Permissions::get()` instead.
+</Note>
+
+```php
+// Retrieved from Permissions
+$permission = $permissions->get('invoices');
+```
+
+## Methods
+
+### getId()
+
+Returns the permission record ID.
+
+```php
+public function getId(): int
+```
+
+<ResponseField name="return" type="int">
+  Database ID of the permission record
+</ResponseField>
+
+```php
+$permissionId = $permission->getId();
+echo "Permission ID: $permissionId";
+```
+
+### getModuleCode()
+
+Returns the module code this permission applies to.
+
+```php
+public function getModuleCode(): string
+```
+
+<ResponseField name="return" type="string">
+  Module identifier code (e.g., `'invoices'`, `'products'`, `'users'`)
+</ResponseField>
+
+```php
+$module = $permission->getModuleCode();
+echo "Access granted to module: $module";
+```
+
+### getFeature()
+
+Returns the array of feature codes.
+
+```php
+public function getFeature(): array
+```
+
+<ResponseField name="return" type="array">
+  Array of feature code strings:
+  - `'0'`: create
+  - `'1'`: read
+  - `'2'`: update
+  - `'3'`: delete
+  - `'4'`: trash
+  - `'5'`: dev
+</ResponseField>
+
+```php
+$features = $permission->getFeature();
+print_r($features); // ['0', '1', '2'] = create, read, update
+```
+
+### getLevel()
+
+Returns the permission level.
+
+```php
+public function getLevel(): int
+```
+
+<ResponseField name="return" type="int">
+  Numeric permission level (higher = more access)
+</ResponseField>
+
+```php
+$level = $permission->getLevel();
+
+if ($level >= 3) {
+    echo "High-level access";
+} elseif ($level >= 2) {
+    echo "Standard access";
+} else {
+    echo "Basic access";
+}
+```
+
+### hasFeature()
+
+Checks if permission includes specific feature(s).
+
+```php
+public function hasFeature(string|array $feature): bool
+```
+
+<ParamField path="feature" type="string|array" required>
+  Feature(s) to check. Can be:
+  - String: single feature name (`'create'`, `'read'`, `'update'`, `'delete'`, `'trash'`, `'dev'`)
+  - String: feature code (`'0'`, `'1'`, `'2'`, `'3'`, `'4'`, `'5'`)
+  - Array: multiple features (all must be present)
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if all specified features are present, `false` otherwise
+</ResponseField>
+
+```php
+// Check single feature by name
+if ($permission->hasFeature('create')) {
+    echo "Can create records";
+}
+
+// Check single feature by code
+if ($permission->hasFeature('1')) { // '1' = read
+    echo "Can read records";
+}
+
+// Check multiple features (all required)
+if ($permission->hasFeature(['read', 'update'])) {
+    echo "Can read and update";
+}
+
+// Mixed names and codes
+if ($permission->hasFeature(['1', 'update', 'delete'])) {
+    echo "Can read, update, and delete";
+}
+```
+
+### moduleIsDeveloping()
+
+Checks if the module is in development mode.
+
+```php
+public function moduleIsDeveloping(): bool
+```
+
+<ResponseField name="return" type="bool">
+  Returns `true` if module is marked as developing, `false` if stable
+</ResponseField>
+
+```php
+if ($permission->moduleIsDeveloping()) {
+    echo '<span class="badge">BETA</span>';
+    echo '<div class="warning">This feature is under development</div>';
+}
+```
+
+## Feature Mapping
+
+The Permission class automatically maps feature names to codes:
+
+| Feature Name | Code | Description |
+|--------------|------|-------------|
+| `create` | `0` | Create new records |
+| `read` | `1` | View/read records |
+| `update` | `2` | Modify existing records |
+| `delete` | `3` | Permanently delete records |
+| `trash` | `4` | Soft delete (move to trash) |
+| `dev` | `5` | Development/debug access |
+
+## Usage Examples
+
+### Basic Feature Check
+
+```php
+$permission = $permissions->get('products');
+
+if ($permission === null) {
+    die('No access to products module');
+}
+
+if ($permission->hasFeature('create')) {
+    // Show create product form
+    renderCreateProductForm();
+}
+
+if ($permission->hasFeature('update')) {
+    // Show edit button
+    echo '<button>Edit Product</button>';
+}
+
+if ($permission->hasFeature('delete')) {
+    // Show delete button
+    echo '<button class="danger">Delete</button>';
+}
+```
+
+### CRUD Operation Control
+
+```php
+function canPerformAction($action, $moduleCode, $permissions) {
+    $permission = $permissions->get($moduleCode);
+    
+    if ($permission === null) {
+        return false;
+    }
+    
+    $actionMap = [
+        'create' => 'create',
+        'view' => 'read',
+        'edit' => 'update',
+        'delete' => 'delete',
+        'archive' => 'trash'
+    ];
+    
+    $feature = $actionMap[$action] ?? null;
+    if ($feature === null) {
+        return false;
+    }
+    
+    return $permission->hasFeature($feature);
+}
+
+// Usage
+if (canPerformAction('edit', 'invoices', $permissions)) {
+    $invoice->update($data);
+} else {
+    throw new Exception('Not authorized to edit invoices');
+}
+```
+
+### Level-Based Access
+
+```php
+$permission = $permissions->get('reports');
+
+if ($permission !== null) {
+    $level = $permission->getLevel();
+    
+    // Basic reports (level 1+)
+    if ($level >= 1) {
+        $reports = Report::where('type', 'basic')->get();
+    }
+    
+    // Advanced reports (level 2+)
+    if ($level >= 2) {
+        $reports = Report::where('type', 'advanced')->get();
+    }
+    
+    // Executive reports (level 3+)
+    if ($level >= 3) {
+        $reports = Report::all();
+    }
+    
+    // System-level access (level 4+)
+    if ($level >= 4) {
+        $canExportRaw = true;
+        $canAccessSystemReports = true;
+    }
+}
+```
+
+### Combined Feature and Level Check
+
+```php
+$permission = $permissions->get('financial_data');
+
+if ($permission !== null) {
+    // Base read access required
+    if ($permission->hasFeature('read')) {
+        $data = FinancialData::forCurrentUser();
+        
+        // High-level users see all data
+        if ($permission->getLevel() >= 3) {
+            $data = FinancialData::all();
+        }
+    }
+    
+    // Only users with create + high level can import
+    if ($permission->hasFeature('create') && $permission->getLevel() >= 3) {
+        echo '<button>Import Financial Data</button>';
+    }
+    
+    // Delete requires specific feature + level 4+
+    if ($permission->hasFeature('delete') && $permission->getLevel() >= 4) {
+        echo '<button class="danger">Delete Financial Records</button>';
+    }
+}
+```
+
+### Development Mode UI
+
+```php
+function renderModuleCard($moduleCode, $permissions) {
+    $permission = $permissions->get($moduleCode);
+    
+    if ($permission === null) {
+        return;
+    }
+    
+    echo '<div class="module-card">';
+    echo '<h3>' . ucfirst($moduleCode) . '</h3>';
+    
+    // Show beta badge for developing modules
+    if ($permission->moduleIsDeveloping()) {
+        echo '<span class="badge badge-warning">BETA</span>';
+        
+        // Only show to users with dev feature
+        if (!$permission->hasFeature('dev')) {
+            echo '<p class="notice">Limited access during development</p>';
+        }
+    }
+    
+    // List available actions
+    $actions = [];
+    if ($permission->hasFeature('read')) $actions[] = 'View';
+    if ($permission->hasFeature('create')) $actions[] = 'Create';
+    if ($permission->hasFeature('update')) $actions[] = 'Edit';
+    if ($permission->hasFeature('delete')) $actions[] = 'Delete';
+    
+    echo '<p>Available actions: ' . implode(', ', $actions) . '</p>';
+    echo '<p>Access level: ' . $permission->getLevel() . '</p>';
+    echo '</div>';
+}
+```
+
+### Permission Audit Log
+
+```php
+function logPermissionCheck($userId, $moduleCode, $action, $permission) {
+    $log = [
+        'user_id' => $userId,
+        'module' => $moduleCode,
+        'action' => $action,
+        'permission_id' => $permission->getId(),
+        'level' => $permission->getLevel(),
+        'features' => $permission->getFeature(),
+        'is_developing' => $permission->moduleIsDeveloping(),
+        'timestamp' => time()
+    ];
+    
+    // Save to audit log
+    AuditLog::create($log);
+}
+
+$permission = $permissions->get('customer_data');
+if ($permission !== null && $permission->hasFeature('read')) {
+    logPermissionCheck($userId, 'customer_data', 'view', $permission);
+    // Proceed with viewing customer data
+}
+```
+
+## See Also
+
+- [Permissions](/api/permissions) - Permission collection class
+- [GAC](/api/gac) - Main GAC class reference
+- [Checking Permissions Guide](/guides/checking-permissions) - Practical usage guide

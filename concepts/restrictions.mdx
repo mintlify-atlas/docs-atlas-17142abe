@@ -1,0 +1,434 @@
+---
+title: Restrictions System
+description: Understanding GAC's restriction system, including restriction types, global vs personal restrictions, and validation methods
+---
+
+## Overview
+
+Restrictions in GAC provide an additional layer of access control beyond basic permissions. While permissions determine what modules a user can access, restrictions define the conditions under which that access is valid (e.g., time periods, specific entities, IP addresses).
+
+## Restriction Architecture
+
+Restrictions are organized in a hierarchical structure:
+
+- **Categories**: Broad classification (e.g., `by_date`, `by_branch`, `by_ip`)
+- **Methods**: Specific validation rules within a category (e.g., `before`, `after`, `in_range`)
+- **Data**: Configuration parameters for each restriction
+
+```php
+// Restriction mapping (Restrictions.php:10-13)
+protected static array $restrictionMap = [
+    'by_date'   => ByDate::class,
+    'by_branch' => ByEntity::class,
+];
+```
+
+## Global vs Personal Restrictions
+
+GAC distinguishes between two scopes of restrictions:
+
+### Global Restrictions
+
+Apply to all entities in the system, stored separately and cached independently.
+
+```php
+// Global restrictions (GAC.php:456-458)
+$entityType = '3'; // Global entity type
+$entityId = '0';   // Irrelevant for global
+$roleIds = [];     // No roles for global
+```
+
+### Personal Restrictions
+
+Apply to specific entities (users/clients) and can be inherited from roles.
+
+```php
+// Personal restrictions (GAC.php:459-464)
+if (!$isGlobal) {
+    $entityType = $this->entityType;  // User or client
+    $entityId = $this->entityId;
+    $result = $this->getEntityRoleData();
+    $roleIds = $result['list'];       // Include role restrictions
+}
+```
+
+### Merging Global and Personal
+
+Both types are merged when loaded:
+
+```php
+// Merge restrictions (GAC.php:189)
+$restrictions = array_merge_recursive($restrictionsG, $restrictionsP);
+return new Restrictions($restrictions);
+```
+
+<Note>
+Global restrictions are loaded once and shared across all entities, while personal restrictions are entity-specific.
+</Note>
+
+## Built-in Restriction Types
+
+### Date Restrictions (ByDate)
+
+Control access based on time periods with support for wildcards:
+
+```php
+// Date restriction methods (ByDate.php:8-13)
+protected array $methods = [
+    'before'    => 'before',     // Allow before a date
+    'in_range'  => 'inRange',    // Allow within date range
+    'out_range' => 'outRange',   // Allow outside date range
+    'after'     => 'after',      // Allow after a date
+];
+```
+
+#### Before Date
+
+Restrict access before a specific date:
+
+```php
+// Before method (ByDate.php:21-44)
+public function before(array $internalData, array $externalData) : bool {
+    // Validate and format date
+    if ($this->validateDataIntegrity($internalData, ['d' => ['string']])) {
+        $internalData['d'] = $this->formatDate($internalData['d']);
+    }
+    
+    // Check if current date is before restriction date
+    if ($externalData['date'] >= $internalData['d']) {
+        return false; // Access denied
+    }
+    
+    return true; // Access allowed
+}
+```
+
+#### Date Range
+
+Restrict access to a specific date range:
+
+```php
+// In range method (ByDate.php:51-75)
+public function inRange(array $internalData, array $externalData) : bool {
+    // Requires start and end dates
+    if ($this->validateDataIntegrity($internalData, 
+        ['sd' => ['string'], 'ed' => ['string']])) {
+        $internalData['sd'] = $this->formatDate($internalData['sd']);
+        $internalData['ed'] = $this->formatDate($internalData['ed']);
+    }
+    
+    // Check if date is within range
+    if (!($externalData['date'] >= $internalData['sd'] && 
+          $externalData['date'] <= $internalData['ed'])) {
+        return false;
+    }
+    
+    return true;
+}
+```
+
+#### Date Wildcards
+
+Support for dynamic date patterns:
+
+```php
+// Format date with wildcards (ByDate.php:147-156)
+function formatDate(string $date, bool $toTime = true) : string|int {
+    $currentDate = date('Y-m-d');
+    $currentDate = explode('-', $currentDate);
+    
+    // Replace wildcards with current values
+    $date = str_replace('%Y', $currentDate['0'], $date); // Year
+    $date = str_replace('%M', $currentDate['1'], $date); // Month
+    $date = str_replace('%D', $currentDate['2'], $date); // Day
+    
+    return $toTime ? strtotime($date) : $date;
+}
+```
+
+<Accordion title="Date Wildcard Examples">
+```php
+// Restrict access until end of current year
+['d' => '%Y-12-31']
+
+// Restrict to current month only
+['sd' => '%Y-%M-01', 'ed' => '%Y-%M-31']
+
+// Allow access starting tomorrow
+['d' => '%Y-%M-%D']  // Will be evaluated daily
+```
+</Accordion>
+
+### Entity Restrictions (ByEntity)
+
+Control access based on specific entity IDs (e.g., branches, departments):
+
+```php
+// Entity restriction methods (ByEntity.php:8-11)
+protected array $methods = [
+    'allow' => 'allow',  // Whitelist entities
+    'deny'  => 'deny',   // Blacklist entities
+];
+```
+
+#### Allow Method
+
+Only permit specific entities:
+
+```php
+// Allow method (ByEntity.php:19-36)
+public function allow(array $internalData, array $externalData) : bool {
+    // Validate data contains list
+    if (!$this->validateDataIntegrity($internalData, ['l' => ['array']])) {
+        return false;
+    }
+    
+    // Validate external entity is provided
+    if(!$this->validateDataIntegrity($externalData, 
+        ['entity' => ['string','integer']])) {
+        return false;
+    }
+    
+    // Check if entity is in allowed list
+    if (!in_array($externalData['entity'], $internalData['l'])) {
+        return false;
+    }
+    
+    return true;
+}
+```
+
+#### Deny Method
+
+Block specific entities:
+
+```php
+// Deny method (ByEntity.php:43-60)
+public function deny(array $internalData, array $externalData) : bool {
+    if (!$this->validateDataIntegrity($internalData, ['l' => ['array']])) {
+        return false;
+    }
+    
+    if($this->validateDataIntegrity($externalData, 
+        ['entity' => ['string','integer']])) {
+        return false;
+    }
+    
+    // Check if entity is in deny list
+    if (in_array($externalData['entity'], $internalData['l'])) {
+        return false;
+    }
+    
+    return true;
+}
+```
+
+## Restriction Priority System
+
+Similar to permissions, restrictions support inheritance with priority:
+
+```php
+// Priority assignment (GAC.php:475-480)
+if ($record['entity_type'] === $this->entityType) {
+    $record['priority'] = -1; // Personal restrictions first
+} else {
+    $record['priority'] = $roleData['priority'][$record['entity_id']] ?? 100;
+}
+```
+
+### Granularity Rules
+
+Only one set of restrictions per category applies:
+
+```php
+// Granularity enforcement (GAC.php:503-511)
+$reservationList = []; // One reservation per category
+foreach ($response as $restriction) {
+    $entityKey = $restriction['entity_type'] . '_' . $restriction['entity_id'];
+    $reservationList[$restriction['category_code']] ??= $entityKey;
+    
+    // Skip if different source already reserved this category
+    if ($reservationList[$restriction['category_code']] !== $entityKey) {
+        continue;
+    }
+    
+    // Store restriction
+    $result[$restriction['category_code']][$restriction['type_code']]['p'] = [...];
+}
+```
+
+<Warning>
+Once a restriction category is "reserved" by a source (personal or specific role), all other sources for that category are ignored.
+</Warning>
+
+## Using Restrictions
+
+### Loading Restrictions
+
+```php
+$gac->setEntity('user', $userId);
+$restrictions = $gac->getRestrictions();
+
+// Check if a restriction category exists
+if ($restrictions->has('by_date')) {
+    // User has date restrictions
+}
+```
+
+### Running Restriction Validation
+
+```php
+// Get date restrictions
+$dateRestrictions = $restrictions->get('by_date');
+
+if ($dateRestrictions) {
+    // Provide external data for validation
+    $externalData = ['date' => time()];
+    
+    if (!$dateRestrictions->run($externalData)) {
+        // Restriction failed
+        $error = $dateRestrictions->getError();
+        throw new Exception('Access restricted: ' . $error['method']);
+    }
+}
+```
+
+### Complete Validation Example
+
+```php
+// Load restrictions
+$restrictions = $gac->getRestrictions();
+
+// Validate date restrictions
+if ($restrictions->has('by_date')) {
+    $dateRestrictions = $restrictions->get('by_date');
+    if (!$dateRestrictions->run(['date' => time()])) {
+        throw new Exception('Access restricted by date');
+    }
+}
+
+// Validate branch restrictions
+if ($restrictions->has('by_branch')) {
+    $branchRestrictions = $restrictions->get('by_branch');
+    if (!$branchRestrictions->run(['entity' => $userBranchId])) {
+        throw new Exception('Access restricted to your branch');
+    }
+}
+```
+
+## Creating Custom Restrictions
+
+Extend the base `Restriction` class to create custom restriction types:
+
+```php
+use DancasDev\GAC\Restrictions\Restriction;
+
+class ByIP extends Restriction {
+    protected array $methods = [
+        'allow' => 'allowIP',
+        'deny'  => 'denyIP',
+    ];
+    
+    public function allowIP(array $internalData, array $externalData) : bool {
+        if (!$this->validateDataIntegrity($internalData, ['ips' => ['array']])) {
+            return false;
+        }
+        
+        if (!$this->validateDataIntegrity($externalData, ['ip' => ['string']])) {
+            return false;
+        }
+        
+        return in_array($externalData['ip'], $internalData['ips']);
+    }
+    
+    public function denyIP(array $internalData, array $externalData) : bool {
+        // Implementation
+    }
+}
+
+// Register the custom restriction
+Restrictions::register('by_ip', ByIP::class);
+```
+
+### Registration Method
+
+```php
+// Register method (Restrictions.php:72-77)
+public static function register(string $alias, string $className): void {
+    if (!is_subclass_of($className, Restriction::class)) {
+        throw new \InvalidArgumentException(
+            'The class "' . $className . '" must extend the base Restriction class.'
+        );
+    }
+    self::$restrictionMap[$alias] = $className;
+}
+```
+
+## Data Storage Structure
+
+Restrictions are stored with the following structure:
+
+```php
+// Personal restrictions format (GAC.php:514-517)
+$result[$categoryCode][$typeCode]['p'] = [
+    'i' => $restriction['id'],    // Restriction ID
+    'd' => $restriction['data']   // JSON configuration data
+];
+
+// Global restrictions format (GAC.php:525-528)
+$response[$categoryCode][$typeCode]['g'] = [
+    'i' => $record['id'],
+    'd' => (@json_decode($record['data'], true) ?? [])
+];
+```
+
+## Database Schema
+
+Restrictions query structure:
+
+```sql
+-- Restrictions query (DatabaseAdapter.php:86-93)
+SELECT a.id, a.entity_type, a.entity_id, 
+       c.code AS category_code, 
+       b.code AS type_code, 
+       a.data
+FROM `gac_restriction` AS a 
+INNER JOIN `gac_restriction_method` AS b ON a.restriction_method_id = b.id 
+INNER JOIN `gac_restriction_category` AS c ON b.restriction_category_id = c.id
+WHERE ((a.entity_type = ? AND a.entity_id = ?)
+   OR (a.entity_type = '0' AND a.entity_id = ?)) -- Roles
+AND a.deleted_at IS NULL 
+AND a.is_disabled = '0'
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Global for System-Wide" icon="globe">
+    Apply global restrictions for organization-wide policies (holidays, maintenance).
+  </Card>
+  
+  <Card title="Personal for Exceptions" icon="user">
+    Use personal restrictions to override global rules for specific users.
+  </Card>
+  
+  <Card title="Validate All Categories" icon="check">
+    Check all applicable restriction categories before granting access.
+  </Card>
+  
+  <Card title="Handle Errors Gracefully" icon="triangle-exclamation">
+    Use getError() to provide meaningful feedback when restrictions fail.
+  </Card>
+</CardGroup>
+
+## Related Topics
+
+<CardGroup cols={2}>
+  <Card title="Permissions" href="/concepts/permissions" icon="key">
+    Understand base permission system
+  </Card>
+  
+  <Card title="Caching" href="/concepts/caching" icon="bolt">
+    Learn how restrictions are cached
+  </Card>
+</CardGroup>

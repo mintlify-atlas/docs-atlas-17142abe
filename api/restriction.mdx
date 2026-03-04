@@ -1,0 +1,468 @@
+---
+title: 'Restriction'
+description: 'Base class for implementing custom restriction types'
+---
+
+## Overview
+
+The `Restriction` class is the base class for all restriction implementations. It provides the core structure and utility methods for validating access based on custom criteria. Extend this class to create custom restriction types.
+
+## Constructor
+
+Creates a Restriction instance with restriction data.
+
+```php
+public function __construct(array $list)
+```
+
+<ParamField path="list" type="array" required>
+  Nested array of restriction methods and their data:
+  ```php
+  [
+      'method_name' => [
+          ['i' => 1, 'd' => [/* data */]],
+          ['i' => 2, 'd' => [/* data */]]
+      ]
+  ]
+  ```
+</ParamField>
+
+## Protected Properties
+
+<ResponseField name="list" type="array">
+  Restriction data organized by method
+</ResponseField>
+
+<ResponseField name="methods" type="array">
+  Map of method names to class method names. Must be defined in child classes:
+  ```php
+  protected array $methods = [
+      'before' => 'before',
+      'after' => 'after',
+      'in_range' => 'inRange'
+  ];
+  ```
+</ResponseField>
+
+<ResponseField name="error" type="array">
+  Stores the last validation error with `'method'` and `'restriction'` keys
+</ResponseField>
+
+## Methods
+
+### has()
+
+Checks if a restriction method exists and is configured.
+
+```php
+public function has(string $method, bool $includeList = true): bool
+```
+
+<ParamField path="method" type="string" required>
+  The restriction method name (e.g., `'before'`, `'in_range'`, `'allow'`)
+</ParamField>
+
+<ParamField path="includeList" type="bool" default="true">
+  Whether to also verify the method exists in the restriction data list
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if method exists and is configured, `false` otherwise
+</ResponseField>
+
+```php
+if ($restriction->has('in_range')) {
+    // This restriction has date range validation configured
+}
+
+// Check if method exists in class (ignore data)
+if ($restriction->has('before', false)) {
+    // The 'before' method is defined in this restriction class
+}
+```
+
+### run()
+
+Executes all configured restriction validations.
+
+```php
+public function run(array $externalData): bool
+```
+
+<ParamField path="externalData" type="array" required>
+  External context data needed for validation (e.g., current date, IP address, entity ID)
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if all restrictions pass, `false` if any restriction fails
+</ResponseField>
+
+```php
+// Date restriction
+$passed = $dateRestriction->run(['date' => time()]);
+
+// Entity restriction
+$passed = $entityRestriction->run(['entity' => 'branch-123']);
+
+// IP restriction
+$passed = $ipRestriction->run(['ip' => '192.168.1.100']);
+
+if (!$passed) {
+    $error = $restriction->getError();
+    echo "Failed: {$error['method']}";
+}
+```
+
+### getError()
+
+Returns the last validation error.
+
+```php
+public function getError(): array
+```
+
+<ResponseField name="return" type="array">
+  Array containing:
+  - `method` (string): The method that failed
+  - `restriction` (array): The restriction data that caused the failure
+</ResponseField>
+
+```php
+if (!$restriction->run($context)) {
+    $error = $restriction->getError();
+    
+    echo "Failed method: {$error['method']}\n";
+    echo "Restriction ID: {$error['restriction']['i']}\n";
+    echo "Restriction data: " . print_r($error['restriction']['d'], true);
+}
+```
+
+### validateDataIntegrity() (Protected)
+
+Utility method to validate data structure and types.
+
+```php
+protected function validateDataIntegrity(array $data, array $list): bool
+```
+
+<ParamField path="data" type="array" required>
+  Data array to validate
+</ParamField>
+
+<ParamField path="list" type="array" required>
+  Expected structure: `['key' => ['type1', 'type2']]`
+  
+  Supported types: `'string'`, `'integer'`, `'array'`, `'boolean'`, `'double'`, `'NULL'`
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if data matches expected structure, `false` otherwise
+</ResponseField>
+
+```php
+// In your restriction method
+public function before(array $internalData, array $externalData): bool {
+    // Validate internal data has 'd' key as string
+    if (!$this->validateDataIntegrity($internalData, ['d' => ['string']])) {
+        return false;
+    }
+    
+    // Validate external data has 'date' key as integer
+    if (!$this->validateDataIntegrity($externalData, ['date' => ['integer']])) {
+        return false;
+    }
+    
+    // Validation logic...
+    return $externalData['date'] < strtotime($internalData['d']);
+}
+```
+
+## Creating Custom Restrictions
+
+### Basic Structure
+
+```php
+use DancasDev\GAC\Restrictions\Restriction;
+
+class ByCustomCriteria extends Restriction {
+    // Define method mappings
+    protected array $methods = [
+        'method_name' => 'methodName',
+        'another_method' => 'anotherMethod'
+    ];
+    
+    // Implement restriction methods
+    public function methodName(array $internalData, array $externalData): bool {
+        // Validate data integrity
+        if (!$this->validateDataIntegrity($internalData, [
+            'required_key' => ['string', 'integer']
+        ])) {
+            return false;
+        }
+        
+        if (!$this->validateDataIntegrity($externalData, [
+            'context_key' => ['string']
+        ])) {
+            return false;
+        }
+        
+        // Implement validation logic
+        return $externalData['context_key'] === $internalData['required_key'];
+    }
+    
+    public function anotherMethod(array $internalData, array $externalData): bool {
+        // Another validation method
+        return true;
+    }
+}
+```
+
+### Complete Example: IP Whitelist/Blacklist
+
+```php
+namespace App\Restrictions;
+
+use DancasDev\GAC\Restrictions\Restriction;
+
+final class ByIpAddress extends Restriction {
+    protected array $methods = [
+        'whitelist' => 'whitelist',
+        'blacklist' => 'blacklist',
+        'range' => 'ipRange'
+    ];
+    
+    /**
+     * Allow only specific IP addresses
+     */
+    public function whitelist(array $internalData, array $externalData): bool {
+        // Validate internal data
+        if (!$this->validateDataIntegrity($internalData, ['ips' => ['array']])) {
+            return false;
+        }
+        
+        // Validate external data
+        if (!$this->validateDataIntegrity($externalData, ['ip' => ['string']])) {
+            return false;
+        }
+        
+        // Check if IP is in whitelist
+        return in_array($externalData['ip'], $internalData['ips']);
+    }
+    
+    /**
+     * Block specific IP addresses
+     */
+    public function blacklist(array $internalData, array $externalData): bool {
+        // Validate data
+        if (!$this->validateDataIntegrity($internalData, ['ips' => ['array']])) {
+            return false;
+        }
+        
+        if (!$this->validateDataIntegrity($externalData, ['ip' => ['string']])) {
+            return false;
+        }
+        
+        // Deny if IP is in blacklist
+        return !in_array($externalData['ip'], $internalData['ips']);
+    }
+    
+    /**
+     * Allow IP range using CIDR notation
+     */
+    public function ipRange(array $internalData, array $externalData): bool {
+        // Validate data
+        if (!$this->validateDataIntegrity($internalData, [
+            'cidr' => ['string']
+        ])) {
+            return false;
+        }
+        
+        if (!$this->validateDataIntegrity($externalData, ['ip' => ['string']])) {
+            return false;
+        }
+        
+        // Check if IP is in CIDR range
+        return $this->ipInRange($externalData['ip'], $internalData['cidr']);
+    }
+    
+    /**
+     * Helper: Check if IP is in CIDR range
+     */
+    private function ipInRange(string $ip, string $cidr): bool {
+        list($subnet, $mask) = explode('/', $cidr);
+        $ip_long = ip2long($ip);
+        $subnet_long = ip2long($subnet);
+        $mask_long = -1 << (32 - (int)$mask);
+        $subnet_long &= $mask_long;
+        return ($ip_long & $mask_long) === $subnet_long;
+    }
+}
+```
+
+### Registration and Usage
+
+```php
+use DancasDev\GAC\Restrictions\Restrictions;
+use App\Restrictions\ByIpAddress;
+
+// Register the custom restriction
+Restrictions::register('by_ip', ByIpAddress::class);
+
+// Use it
+$restrictions = $gac->getRestrictions();
+
+if ($restrictions->has('by_ip')) {
+    $ipRestriction = $restrictions->get('by_ip');
+    
+    $userIp = $_SERVER['REMOTE_ADDR'];
+    $allowed = $ipRestriction->run(['ip' => $userIp]);
+    
+    if (!$allowed) {
+        $error = $ipRestriction->getError();
+        die("Access denied from IP {$userIp}: {$error['method']}");
+    }
+}
+```
+
+## Method Implementation Guidelines
+
+### Method Signature
+
+All restriction methods must follow this signature:
+
+```php
+public function methodName(array $internalData, array $externalData): bool
+```
+
+<ParamField path="internalData" type="array">
+  Data stored in the restriction configuration (from database)
+</ParamField>
+
+<ParamField path="externalData" type="array">
+  Runtime context data passed when checking the restriction
+</ParamField>
+
+### Implementation Pattern
+
+```php
+public function myRestrictionMethod(array $internalData, array $externalData): bool {
+    // 1. Validate internal data structure
+    if (!$this->validateDataIntegrity($internalData, [
+        'required_field' => ['string'],
+        'optional_field' => ['string', 'NULL']
+    ])) {
+        return false;
+    }
+    
+    // 2. Validate external data structure
+    if (!$this->validateDataIntegrity($externalData, [
+        'context_field' => ['integer', 'string']
+    ])) {
+        return false;
+    }
+    
+    // 3. Process/transform data if needed
+    $processedValue = $this->processData($internalData['required_field']);
+    
+    // 4. Perform validation logic
+    if ($externalData['context_field'] !== $processedValue) {
+        return false; // Restriction fails
+    }
+    
+    // 5. Return true if restriction passes
+    return true;
+}
+```
+
+## Advanced Example: Geolocation Restriction
+
+```php
+namespace App\Restrictions;
+
+use DancasDev\GAC\Restrictions\Restriction;
+
+final class ByGeolocation extends Restriction {
+    protected array $methods = [
+        'countries' => 'allowedCountries',
+        'radius' => 'withinRadius'
+    ];
+    
+    public function allowedCountries(array $internalData, array $externalData): bool {
+        // Validate configuration
+        if (!$this->validateDataIntegrity($internalData, [
+            'countries' => ['array'],
+            'mode' => ['string'] // 'allow' or 'deny'
+        ])) {
+            return false;
+        }
+        
+        // Validate runtime data
+        if (!$this->validateDataIntegrity($externalData, [
+            'country' => ['string']
+        ])) {
+            return false;
+        }
+        
+        $isInList = in_array(
+            strtoupper($externalData['country']),
+            array_map('strtoupper', $internalData['countries'])
+        );
+        
+        // Allow or deny based on mode
+        if ($internalData['mode'] === 'allow') {
+            return $isInList;
+        } else {
+            return !$isInList;
+        }
+    }
+    
+    public function withinRadius(array $internalData, array $externalData): bool {
+        // Validate configuration
+        if (!$this->validateDataIntegrity($internalData, [
+            'lat' => ['double', 'integer'],
+            'lng' => ['double', 'integer'],
+            'radius_km' => ['integer', 'double']
+        ])) {
+            return false;
+        }
+        
+        // Validate runtime data
+        if (!$this->validateDataIntegrity($externalData, [
+            'lat' => ['double', 'integer'],
+            'lng' => ['double', 'integer']
+        ])) {
+            return false;
+        }
+        
+        // Calculate distance using Haversine formula
+        $distance = $this->calculateDistance(
+            $internalData['lat'], $internalData['lng'],
+            $externalData['lat'], $externalData['lng']
+        );
+        
+        return $distance <= $internalData['radius_km'];
+    }
+    
+    private function calculateDistance($lat1, $lng1, $lat2, $lng2): float {
+        $earthRadius = 6371; // km
+        
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        
+        $a = sin($dLat/2) * sin($dLat/2) +
+             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+             sin($dLng/2) * sin($dLng/2);
+        
+        $c = 2 * atan2(sqrt($a), sqrt(1-$a));
+        
+        return $earthRadius * $c;
+    }
+}
+```
+
+## See Also
+
+- [Restrictions](/api/restrictions) - Restriction collection class
+- [ByDate](/api/restrictions/by-date) - Date restriction implementation
+- [ByEntity](/api/restrictions/by-entity) - Entity restriction implementation
+- [Managing Restrictions Guide](/guides/managing-restrictions) - Practical usage guide

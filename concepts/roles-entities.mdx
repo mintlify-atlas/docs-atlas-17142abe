@@ -1,0 +1,459 @@
+---
+title: Roles & Entities
+description: Understanding entity types, role assignment, and the priority system that controls permission inheritance in GAC
+---
+
+## Overview
+
+GAC's entity and role system provides a flexible way to manage permissions and restrictions across different types of users and organizational structures. The system supports multiple entity types, role-based access control (RBAC), and a sophisticated priority mechanism.
+
+## Entity Types
+
+GAC distinguishes between three primary entity types:
+
+```php
+// Entity type mapping (GAC.php:17)
+protected array $entityTypeKeys = [
+    'user'   => '1',
+    'client' => '2'
+];
+```
+
+<Note>
+Entity type `'0'` is reserved for **roles**, and `'3'` is reserved for **global** restrictions.
+</Note>
+
+### Users
+
+Individual users of the system. Most common entity type.
+
+```php
+$gac->setEntity('user', 12345);
+```
+
+### Clients
+
+Organizations, companies, or client accounts that may have different access requirements.
+
+```php
+$gac->setEntity('client', 789);
+```
+
+### Setting the Entity
+
+Before loading permissions or restrictions, you must specify which entity to work with:
+
+```php
+// Set entity method (GAC.php:25-29)
+public function setEntity(string $entityType, string|int $entityId) : GAC {
+    // Convert friendly names to internal codes
+    $this->entityType = (string) ($this->entityTypeKeys[$entityType] ?? $entityType);
+    $this->entityId = $entityId;
+    return $this;
+}
+```
+
+<Warning>
+Attempting to load permissions or restrictions without setting an entity first will throw an exception.
+</Warning>
+
+```php
+// Validation (GAC.php:141-143)
+if (empty($this->entityType) || empty($this->entityId)) {
+    throw new \Exception('Entity type and ID must be set before loading data.');
+}
+```
+
+## Role System
+
+### Role Assignment
+
+Entities can be assigned multiple roles, each with a specific priority value:
+
+```php
+// Get roles query (DatabaseAdapter.php:49-59)
+SELECT b.id, b.code, a.priority
+FROM `gac_role_entity` AS a 
+INNER JOIN `gac_role` AS b ON a.role_id = b.id
+WHERE a.entity_type = :entity_type 
+  AND a.entity_id = :entity_id 
+  AND a.is_disabled = '0' 
+  AND b.is_disabled = '0' 
+  AND a.deleted_at IS NULL 
+  AND b.deleted_at IS NULL
+ORDER BY a.priority ASC
+```
+
+### Role Data Structure
+
+Role information is retrieved and cached per entity:
+
+```php
+// Get entity role data (GAC.php:59-72)
+public function getEntityRoleData(bool $reset = false) {
+    if ($reset || empty($this->entityRoleData)) {
+        $data = ['list' => [], 'priority' => []];
+        $result = $this->databaseAdapter->getRoles(
+            $this->entityType, 
+            $this->entityId
+        );
+        
+        foreach ($result as $key => $role) {
+            $data['priority'][$role['id']] = (int) $role['priority'];
+            $data['list'][] = $role['id'];
+        }
+        
+        $this->entityRoleData = $data;
+    }
+    
+    return $this->entityRoleData;
+}
+```
+
+This creates a structure like:
+
+```php
+[
+    'list' => [101, 102, 103],  // Array of role IDs
+    'priority' => [
+        101 => 10,  // Admin role, priority 10
+        102 => 20,  // Manager role, priority 20
+        103 => 30   // User role, priority 30
+    ]
+]
+```
+
+## Priority System
+
+The priority system determines which permissions and restrictions take effect when multiple sources grant access to the same resource.
+
+### Priority Values
+
+<Steps>
+  <Step title="Personal (Priority -1)">
+    Permissions and restrictions assigned directly to the entity always take precedence.
+    
+    ```php
+    // Personal priority (GAC.php:382-383)
+    if ($record['from_entity_type'] !== '0') {
+        $record['priority'] = -1; // Personal permissions first
+    }
+    ```
+  </Step>
+  
+  <Step title="Role-Based (Priority 0+)">
+    Permissions inherited from roles use the role's assigned priority value.
+    
+    ```php
+    // Role priority (GAC.php:384-386)
+    else {
+        // Use role priority from assignment
+        $record['priority'] = $roleData['priority'][$record['from_entity_id']] ?? 100;
+    }
+    ```
+  </Step>
+  
+  <Step title="Default Fallback (Priority 100)">
+    If a role priority is not found, default to 100.
+  </Step>
+</Steps>
+
+### Priority Sorting
+
+Permissions and restrictions are sorted by priority before processing:
+
+```php
+// Sort by priority (GAC.php:402-405)
+if (!empty($roleData['priority'])) {
+    usort($permissions, function(array $a, array $b) {
+        return $a['priority'] <=> $b['priority'];
+    });
+}
+```
+
+<Info>
+**Lower priority values are processed first**. Personal permissions with priority `-1` will always override role-based permissions.
+</Info>
+
+### First Match Wins
+
+Once a permission is assigned for a module, subsequent matches are ignored:
+
+```php
+// First match logic (GAC.php:428)
+if (!array_key_exists($moduleData['code'], $response)) {
+    // This is the first permission for this module - use it
+    $response[$moduleData['code']] = [
+        'i' => $permission['id'],
+        'd' => $moduleData['is_developing'],
+        'f' => $permission['feature'],
+        'l' => $permission['level']
+    ];
+}
+// Else: skip this permission, module already has one
+```
+
+## Priority Examples
+
+### Example 1: Personal Override
+
+```php
+// Entity has:
+// - Personal permission: users module, read+write (priority -1)
+// - Admin role: users module, full access (priority 10)
+// - User role: users module, read-only (priority 20)
+
+// Result: Personal permission is used (read+write only)
+```
+
+### Example 2: Role Hierarchy
+
+```php
+// Entity has:
+// - Admin role: users module, full access (priority 10)
+// - Manager role: users module, read+update (priority 20)  
+// - Staff role: users module, read-only (priority 30)
+
+// Result: Admin role permission is used (full access)
+```
+
+### Example 3: Mixed Sources
+
+```php
+// Entity has:
+// - Personal: reports module, read-only (priority -1)
+// - Admin role: reports module, full access (priority 10)
+// - Admin role: users module, full access (priority 10)
+// - Manager role: settings module, read+update (priority 20)
+
+// Result:
+// - reports: read-only (personal)
+// - users: full access (admin role)
+// - settings: read+update (manager role)
+```
+
+## Practical Usage
+
+### Basic Setup
+
+```php
+$gac = new GAC();
+$gac->setDatabase($pdo);
+$gac->setCache();
+
+// For a user
+$gac->setEntity('user', 12345);
+$permissions = $gac->getPermissions();
+
+// For a client
+$gac->setEntity('client', 789);
+$clientPermissions = $gac->getPermissions();
+```
+
+### Inspecting Role Data
+
+```php
+$gac->setEntity('user', 12345);
+$roleData = $gac->getEntityRoleData();
+
+echo "Assigned Roles: " . implode(', ', $roleData['list']);
+// Output: Assigned Roles: 101, 102, 103
+
+foreach ($roleData['priority'] as $roleId => $priority) {
+    echo "Role $roleId has priority $priority\n";
+}
+// Output:
+// Role 101 has priority 10
+// Role 102 has priority 20  
+// Role 103 has priority 30
+```
+
+### Forcing Role Data Refresh
+
+```php
+// Refresh role data from database
+$roleData = $gac->getEntityRoleData(true);
+```
+
+## Database Schema
+
+### Role Entity Assignment
+
+The `gac_role_entity` table links entities to roles:
+
+```sql
+CREATE TABLE gac_role_entity (
+    id INT PRIMARY KEY,
+    role_id INT,           -- Foreign key to gac_role
+    entity_type TINYINT,   -- 1=user, 2=client
+    entity_id INT,         -- User or client ID
+    priority INT,          -- Priority value
+    is_disabled TINYINT,
+    deleted_at TIMESTAMP
+);
+```
+
+### Role Definition
+
+The `gac_role` table defines available roles:
+
+```sql
+CREATE TABLE gac_role (
+    id INT PRIMARY KEY,
+    code VARCHAR(255),     -- Unique role identifier
+    is_disabled TINYINT,
+    deleted_at TIMESTAMP
+);
+```
+
+## Permission and Restriction Queries
+
+Both permissions and restrictions query across entity and role assignments:
+
+```php
+// Permissions query (DatabaseAdapter.php:67-74)
+$query = 'SELECT id, from_entity_type, from_entity_id, 
+                 to_entity_type, to_entity_id, feature, level'
+       . ' FROM `gac_module_access`'
+       . ' WHERE ((`from_entity_type` = ? AND `from_entity_id` = ?)'; // Personal
+       
+foreach ($roleIds as $key => $id) {
+    $query .= ' OR (`from_entity_type` = \'0\' AND `from_entity_id` = ?)'; // Roles
+}
+
+$query .= ') AND `deleted_at` IS NULL AND `is_disabled` = \'0\''
+       . ' ORDER BY `from_entity_type` DESC';
+```
+
+The same pattern applies to restrictions queries (see `DatabaseAdapter.php:86-96`).
+
+## Cache Key Generation
+
+Cache keys are generated based on entity type and ID:
+
+```php
+// Cache key generation (GAC.php:49-57)
+public function getCacheKey(string $type) : string {
+    if ($type == 'restrictions_global') {
+        return $this->cachekey . '_r_global';
+    } else {
+        $type = substr($type, 0, 1); // 'p' or 'r'
+        return $this->cachekey . '_' . $type . '_' 
+             . $this->entityType . '_' . $this->entityId;
+    }
+}
+```
+
+**Example Keys**:
+- `gac_p_1_12345` - Permissions for user 12345
+- `gac_r_2_789` - Restrictions for client 789
+- `gac_r_global` - Global restrictions
+
+## Purging Cache by Entity Type
+
+GAC can purge cache for specific entity types:
+
+```php
+// Purge by entity type (GAC.php:270-285)
+if ($entityType == 'user') {
+    $list['1'] = $entityIds;
+}
+elseif ($entityType == 'client') {
+    $list['2'] = $entityIds;
+}
+elseif($entityType == 'role') {
+    // Get all entities with this role
+    $result = $this->databaseAdapter->getEntitiesByRoles($entityIds);
+    foreach ($result as $record) {
+        $list[$record['entity_type']] ??= [];
+        $list[$record['entity_type']][$record['entity_id']] = $record['entity_id'];
+    }
+}
+```
+
+### Usage Examples
+
+```php
+// Purge cache for specific users
+$gac->purgePermissionsBy('user', [12345, 67890]);
+
+// Purge cache for a client
+$gac->purgeRestrictionsBy('client', [789]);
+
+// Purge all entities with a specific role
+$gac->purgePermissionsBy('role', [101]);
+
+// Purge everything
+$gac->purgePermissionsBy('global');
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Roles for Groups" icon="users">
+    Assign roles for department, position, or access level groupings.
+  </Card>
+  
+  <Card title="Personal for Exceptions" icon="user">
+    Use personal permissions only for exceptions or temporary overrides.
+  </Card>
+  
+  <Card title="Lower Priority = Higher Importance" icon="arrow-down-1-9">
+    Remember: lower priority numbers are processed first (most important).
+  </Card>
+  
+  <Card title="Keep Priorities Spaced" icon="chart-simple">
+    Use increments of 10 (10, 20, 30) to allow for future insertions.
+  </Card>
+</CardGroup>
+
+## Common Patterns
+
+### Multi-Tenant Setup
+
+Use clients for tenant isolation:
+
+```php
+// Each client has different access
+$gac->setEntity('client', $tenantId);
+$permissions = $gac->getPermissions();
+```
+
+### Hierarchical Roles
+
+Create role hierarchy with priorities:
+
+```plaintext
+Super Admin (priority: 5)
+├── Admin (priority: 10)
+│   ├── Manager (priority: 20)
+│   │   └── Staff (priority: 30)
+│   └── Supervisor (priority: 25)
+└── Support (priority: 15)
+```
+
+### Temporary Access
+
+Grant temporary elevated access via personal permissions:
+
+```php
+// User normally has Staff role (priority 30)
+// Temporarily grant Admin permissions as personal (priority -1)
+// Personal permissions override role-based access
+```
+
+## Related Topics
+
+<CardGroup cols={3}>
+  <Card title="Permissions" href="/concepts/permissions" icon="key">
+    How permissions work with roles
+  </Card>
+  
+  <Card title="Restrictions" href="/concepts/restrictions" icon="ban">
+    Role-based restrictions
+  </Card>
+  
+  <Card title="Caching" href="/concepts/caching" icon="bolt">
+    Cache strategies for entities
+  </Card>
+</CardGroup>

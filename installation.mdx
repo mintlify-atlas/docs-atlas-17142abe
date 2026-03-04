@@ -1,0 +1,160 @@
+---
+title: Installation
+description: Install GAC (Granular Access Control) library via Composer and set up the required database schema
+---
+
+## System requirements
+
+Before installing GAC, ensure your system meets these requirements:
+
+- **PHP**: 8.0 or higher
+- **Database**: MySQL 5.7+ or MariaDB 10.2+
+- **PHP Extensions**: PDO, pdo_mysql
+- **Composer**: Latest stable version
+
+<Warning>
+  GAC uses modern PHP features including typed properties, union types, and constructor property promotion. PHP 8.0+ is required.
+</Warning>
+
+## Install via Composer
+
+Install GAC using Composer by running this command in your project directory:
+
+```bash
+composer require dancasdev/gac
+```
+
+Composer will automatically install GAC and configure autoloading through PSR-4.
+
+<Info>
+  The package is registered as `dancasdev/gac` on Packagist and follows semantic versioning.
+</Info>
+
+## Database setup
+
+GAC requires several database tables to store permissions, roles, and restrictions. Import the provided SQL schema into your database.
+
+<Steps>
+  <Step title="Download the schema">
+    The `tables.sql` file is included in the package at `vendor/dancasdev/gac/tables.sql`
+  </Step>
+  <Step title="Review the schema">
+    Examine the tables to understand the structure. You can customize certain tables like `gac_user` and `glb_person` to fit your application
+  </Step>
+  <Step title="Import into your database">
+    Run the SQL file against your database using your preferred method
+  </Step>
+</Steps>
+
+### Using MySQL command line
+
+```bash
+mysql -u your_username -p your_database < vendor/dancasdev/gac/tables.sql
+```
+
+### Using PHP
+
+```php
+$pdo = new PDO('mysql:host=localhost;dbname=your_database', 'username', 'password');
+$sql = file_get_contents('vendor/dancasdev/gac/tables.sql');
+$pdo->exec($sql);
+```
+
+## Database schema overview
+
+The schema creates the following core tables:
+
+<AccordionGroup>
+  <Accordion title="Permission tables">
+    - `gac_module_category` - Categories for grouping modules
+    - `gac_module` - Individual modules/features in your application
+    - `gac_module_access` - Permission assignments to users, clients, and roles
+  </Accordion>
+  
+  <Accordion title="Role tables">
+    - `gac_role` - Role definitions
+    - `gac_role_entity` - Role assignments to users and clients with priority levels
+  </Accordion>
+  
+  <Accordion title="Restriction tables">
+    - `gac_restriction_category` - Categories of restrictions (by_date, by_branch, etc.)
+    - `gac_restriction_method` - Specific restriction methods within categories
+    - `gac_restriction` - Restriction assignments to entities
+  </Accordion>
+  
+  <Accordion title="Entity tables">
+    - `gac_user` - User accounts (customizable)
+    - `gac_client` - API clients/external systems (customizable)
+    - `glb_person` - Person directory (customizable)
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  The `gac_user`, `gac_client`, and `glb_person` tables are provided as examples. You can modify these tables or use your existing user tables by implementing custom database adapters.
+</Note>
+
+## Verify installation
+
+Verify that GAC is installed correctly by checking if the classes can be autoloaded:
+
+```php
+<?php
+
+require_once 'vendor/autoload.php';
+
+use DancasDev\GAC\GAC;
+
+if (class_exists('DancasDev\\GAC\\GAC')) {
+    echo "GAC is installed successfully!";
+} else {
+    echo "Installation failed. Check your Composer setup.";
+}
+```
+
+## Package structure
+
+Once installed, GAC's source code is organized as follows:
+
+```
+vendor/dancasdev/gac/
+├── src/
+│   ├── GAC.php                    # Main GAC class
+│   ├── Adapters/
+│   │   ├── DatabaseAdapter.php     # Default PDO database adapter
+│   │   ├── DatabaseAdapterInterface.php
+│   │   ├── CacheAdapter.php        # Default file-based cache adapter
+│   │   └── CacheAdapterInterface.php
+│   ├── Permissions/
+│   │   ├── Permission.php          # Single permission instance
+│   │   └── Permissions.php         # Permission collection
+│   ├── Restrictions/
+│   │   ├── Restriction.php         # Base restriction class
+│   │   ├── Restrictions.php        # Restriction collection
+│   │   ├── ByDate.php             # Date-based restrictions
+│   │   └── ByEntity.php           # Entity-based restrictions
+│   └── Exceptions/
+│       ├── DatabaseAdapterException.php
+│       └── CacheAdapterException.php
+├── tables.sql                      # Database schema
+└── composer.json                   # Package metadata
+```
+
+## Configuration options
+
+GAC requires minimal configuration. You'll primarily work with:
+
+1. **Database connection** - PDO instance or connection array
+2. **Cache settings** - Optional cache directory and TTL
+3. **Entity configuration** - User or client identification
+
+<Tip>
+  You can use the default adapters for quick setup, or implement the adapter interfaces for custom database and caching solutions.
+</Tip>
+
+## Next steps
+
+With GAC installed and your database configured, you're ready to start using the library.
+
+<Card title="Quickstart guide" icon="rocket" href="/quickstart">
+  Learn how to configure GAC and perform your first permission check
+</Card>

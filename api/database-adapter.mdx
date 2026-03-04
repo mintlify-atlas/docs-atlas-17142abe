@@ -1,0 +1,431 @@
+---
+title: "DatabaseAdapter"
+description: "Database adapter for managing GAC access control data storage and retrieval"
+---
+
+## Overview
+
+The `DatabaseAdapter` class provides database connectivity and data retrieval methods for the GAC (Gestión de Acceso y Control) system. It implements the `DatabaseAdapterInterface` and handles all database operations related to roles, permissions, restrictions, and modules.
+
+## Class Reference
+
+### DatabaseAdapter
+
+**Namespace:** `DancasDev\GAC\Adapters`
+
+**Implements:** `DatabaseAdapterInterface`
+
+## Constructor
+
+```php
+public function __construct(PDO|array $params)
+```
+
+Initializes the database adapter with either a PDO instance or connection parameters.
+
+<ParamField path="params" type="PDO|array" required>
+  Database connection. Can be either:
+  - A `PDO` instance for direct connection reuse
+  - An array with connection parameters: `host`, `username`, `password`, `database`
+</ParamField>
+
+**Throws:**
+- `DatabaseAdapterException` - If connection parameters are invalid or connection fails
+
+**Example:**
+
+```php
+// Using PDO instance
+$pdo = new PDO('mysql:host=localhost;dbname=mydb', 'user', 'pass');
+$adapter = new DatabaseAdapter($pdo);
+
+// Using connection parameters
+$adapter = new DatabaseAdapter([
+    'host' => 'localhost',
+    'username' => 'user',
+    'password' => 'pass',
+    'database' => 'mydb'
+]);
+```
+
+## Methods
+
+### getRoles
+
+```php
+public function getRoles(string $entityType, string|int $entityId): array
+```
+
+Retrieves roles assigned to a specific entity.
+
+<ParamField path="entityType" type="string" required>
+  Type of entity:
+  - `'1'` for user
+  - `'2'` for client
+</ParamField>
+
+<ParamField path="entityId" type="string|int" required>
+  Identifier of the entity
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="array" type="array">
+  Array of roles assigned to the entity, ordered by priority (ascending)
+  
+  <Expandable title="Role structure">
+    <ResponseField name="id" type="string">
+      Role identifier
+    </ResponseField>
+    <ResponseField name="code" type="string">
+      Role code
+    </ResponseField>
+    <ResponseField name="priority" type="string">
+      Role priority level
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```php
+$roles = $adapter->getRoles('1', 123);
+// Returns: [
+//   ['id' => '5', 'code' => 'admin', 'priority' => '1'],
+//   ['id' => '8', 'code' => 'editor', 'priority' => '2']
+// ]
+```
+
+### getPermissions
+
+```php
+public function getPermissions(string $entityType, string|int $entityId, array $roleIds = []): array
+```
+
+Retrieves permissions associated with an entity, including both direct permissions and those inherited from assigned roles.
+
+<ParamField path="entityType" type="string" required>
+  Type of entity:
+  - `'0'` returns empty array (special case)
+  - `'1'` for user
+  - `'2'` for client
+</ParamField>
+
+<ParamField path="entityId" type="string|int" required>
+  Identifier of the entity
+</ParamField>
+
+<ParamField path="roleIds" type="array" default="[]">
+  Array of role identifiers for inherited permissions (optional)
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="array" type="array">
+  Array of permissions (unprocessed), ordered by `from_entity_type` (descending)
+  
+  <Expandable title="Permission structure">
+    <ResponseField name="id" type="string">
+      Permission identifier
+    </ResponseField>
+    <ResponseField name="from_entity_type" type="string">
+      Type of entity that owns the permission:
+      - `'0'` for role
+      - `'1'` for user
+      - `'2'` for client
+    </ResponseField>
+    <ResponseField name="from_entity_id" type="string">
+      Identifier of the entity that owns the permission
+    </ResponseField>
+    <ResponseField name="to_entity_type" type="string">
+      Type of entity the permission applies to:
+      - `'0'` for module category
+      - `'1'` for module
+    </ResponseField>
+    <ResponseField name="to_entity_id" type="string">
+      Identifier of the entity the permission applies to
+    </ResponseField>
+    <ResponseField name="feature" type="string">
+      Comma-separated string of allowed features:
+      - `'0'` Create
+      - `'1'` Read
+      - `'2'` Update
+      - `'3'` Delete
+      - `'4'` Trash access (works with 1, 2, 3)
+      - `'5'` Development mode access
+    </ResponseField>
+    <ResponseField name="level" type="string">
+      Permission level:
+      - `'0'` Low
+      - `'1'` Normal
+      - `'2'` High
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```php
+$permissions = $adapter->getPermissions('1', 123, [5, 8]);
+// Returns permissions for user 123 and roles 5, 8
+```
+
+### getRestrictions
+
+```php
+public function getRestrictions(string $entityType, string|int $entityId, array $roleIds = []): array
+```
+
+Retrieves restrictions associated with an entity, including both direct restrictions and those inherited from assigned roles.
+
+<ParamField path="entityType" type="string" required>
+  Type of entity:
+  - `'0'` returns empty array (special case)
+  - `'1'` for user
+  - `'2'` for client
+</ParamField>
+
+<ParamField path="entityId" type="string|int" required>
+  Identifier of the entity
+</ParamField>
+
+<ParamField path="roleIds" type="array" default="[]">
+  Array of role identifiers for inherited restrictions (optional)
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="array" type="array">
+  Array of restrictions (unprocessed), ordered by `entity_type` (descending)
+  
+  <Expandable title="Restriction structure">
+    <ResponseField name="id" type="string">
+      Restriction identifier
+    </ResponseField>
+    <ResponseField name="entity_type" type="string">
+      Type of entity that owns the restriction:
+      - `'0'` for role
+      - `'1'` for user
+      - `'2'` for client
+      - `'3'` for all
+    </ResponseField>
+    <ResponseField name="entity_id" type="string">
+      Identifier of the entity that owns the restriction
+    </ResponseField>
+    <ResponseField name="category_code" type="string">
+      Code of the restriction category
+    </ResponseField>
+    <ResponseField name="type_code" type="string">
+      Code of the restriction type
+    </ResponseField>
+    <ResponseField name="data" type="string">
+      Data for validating the restriction (format depends on restriction type)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```php
+$restrictions = $adapter->getRestrictions('1', 123, [5]);
+// Returns restrictions for user 123 and role 5
+```
+
+### getModulesData
+
+```php
+public function getModulesData(array $categoryIds = [], array $moduleIds = []): array
+```
+
+Retrieves module data based on provided module and/or category IDs.
+
+<ParamField path="categoryIds" type="array" default="[]">
+  Array of module category identifiers (optional)
+</ParamField>
+
+<ParamField path="moduleIds" type="array" default="[]">
+  Array of module identifiers (optional)
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="array" type="array">
+  Array of module data. Returns empty array if both parameters are empty.
+  
+  <Expandable title="Module structure">
+    <ResponseField name="id" type="string">
+      Module identifier
+    </ResponseField>
+    <ResponseField name="module_category_id" type="string">
+      Module category identifier
+    </ResponseField>
+    <ResponseField name="code" type="string">
+      Module code
+    </ResponseField>
+    <ResponseField name="is_developing" type="string">
+      Development status:
+      - `'0'` No
+      - `'1'` Yes
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```php
+$modules = $adapter->getModulesData([1, 2], [10, 11]);
+// Returns modules from categories 1, 2 and specific modules 10, 11
+```
+
+### getEntitiesByRoles
+
+```php
+public function getEntitiesByRoles(array $roleIds): array
+```
+
+Retrieves entities related to specific roles.
+
+<ParamField path="roleIds" type="array" required>
+  Array of role identifiers
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="array" type="array">
+  Array of entities related to the roles. Returns empty array if roleIds is empty.
+  
+  <Expandable title="Entity structure">
+    <ResponseField name="id" type="string">
+      Relationship identifier
+    </ResponseField>
+    <ResponseField name="role_id" type="string">
+      Role identifier
+    </ResponseField>
+    <ResponseField name="entity_type" type="string">
+      Type of entity:
+      - `'1'` for user
+      - `'2'` for client
+    </ResponseField>
+    <ResponseField name="entity_id" type="string">
+      Entity identifier
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```php
+$entities = $adapter->getEntitiesByRoles([5, 8]);
+// Returns all entities with roles 5 or 8
+```
+
+### destroyConnection
+
+```php
+public function destroyConnection(): bool
+```
+
+Destroys the database connection.
+
+**Returns:**
+
+<ResponseField name="bool" type="bool">
+  Always returns `true`
+</ResponseField>
+
+**Note:** This method is automatically called by the destructor.
+
+## DatabaseAdapterInterface
+
+The `DatabaseAdapterInterface` defines the contract that all database adapters must implement for GAC.
+
+### Interface Methods
+
+All methods listed above are defined in the interface. Implementing this interface allows you to create custom database adapters for different database systems or ORMs.
+
+## Creating a Custom Database Adapter
+
+You can create a custom database adapter by implementing the `DatabaseAdapterInterface`:
+
+```php
+use DancasDev\GAC\Adapters\DatabaseAdapterInterface;
+
+class CustomDatabaseAdapter implements DatabaseAdapterInterface {
+    private $connection;
+    
+    public function __construct($customConnection) {
+        $this->connection = $customConnection;
+    }
+    
+    public function getRoles(string $entityType, string|int $entityId): array {
+        // Custom implementation
+        return $this->connection->query(
+            'SELECT id, code, priority FROM roles WHERE entity_type = ? AND entity_id = ?',
+            [$entityType, $entityId]
+        );
+    }
+    
+    public function getPermissions(string $entityType, string|int $entityId, array $roleIds = []): array {
+        // Custom implementation
+        // Must return permissions in the expected format
+    }
+    
+    public function getRestrictions(string $entityType, string|int $entityId, array $roleIds = []): array {
+        // Custom implementation
+    }
+    
+    public function getModulesData(array $categoryIds = [], array $moduleIds = []): array {
+        // Custom implementation
+    }
+    
+    public function getEntitiesByRoles(array $roleIds): array {
+        // Custom implementation
+    }
+}
+
+// Use with GAC
+$customAdapter = new CustomDatabaseAdapter($myConnection);
+$gac = new GAC($customAdapter);
+```
+
+## Database Schema Requirements
+
+The default `DatabaseAdapter` expects the following tables:
+
+- `gac_role` - Stores role definitions
+- `gac_role_entity` - Links roles to entities (users/clients)
+- `gac_module_access` - Stores permission rules
+- `gac_restriction` - Stores restriction rules
+- `gac_restriction_method` - Defines restriction types
+- `gac_restriction_category` - Categorizes restrictions
+- `gac_module` - Stores module definitions
+- `gac_module_category` - Categorizes modules
+
+Each table should include:
+- `is_disabled` column (0 = active, 1 = disabled)
+- `deleted_at` column (NULL = active, timestamp = soft deleted)
+
+## Error Handling
+
+The `DatabaseAdapter` throws `DatabaseAdapterException` in the following cases:
+
+- Invalid connection parameters provided to constructor
+- Database connection fails
+- Cannot set cache directory (for CacheAdapter)
+
+Always wrap adapter operations in try-catch blocks:
+
+```php
+try {
+    $adapter = new DatabaseAdapter([
+        'host' => 'localhost',
+        'username' => 'user',
+        'password' => 'pass',
+        'database' => 'mydb'
+    ]);
+    $roles = $adapter->getRoles('1', 123);
+} catch (DatabaseAdapterException $e) {
+    // Handle database adapter errors
+    error_log('Database adapter error: ' . $e->getMessage());
+}
+```

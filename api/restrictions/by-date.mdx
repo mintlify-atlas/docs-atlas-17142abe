@@ -1,0 +1,505 @@
+---
+title: 'ByDate'
+description: 'Date-based restrictions for access control'
+---
+
+## Overview
+
+The `ByDate` class provides date-based restriction methods to control access based on temporal conditions. It supports validation before, after, and within/outside date ranges, with wildcard support for dynamic date matching.
+
+## Class Reference
+
+<ParamField path="ByDate" type="class">
+  Extends `Restriction` class to provide date-specific access control methods.
+</ParamField>
+
+### Available Methods
+
+The class maps method names to their implementations:
+
+```php
+protected array $methods = [
+    'before' => 'before',
+    'in_range' => 'inRange',
+    'out_range' => 'outRange',
+    'after' => 'after',
+];
+```
+
+---
+
+## before()
+
+Allow access before a specific date.
+
+<ParamField path="internalData" type="array" required>
+  Internal restriction data structure
+  
+  <Expandable title="properties">
+    <ParamField path="d" type="string" required>
+      Target date in `YYYY-MM-DD` format. Supports wildcards: `%Y` (current year), `%M` (current month), `%D` (current day)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="externalData" type="array" required>
+  External validation data
+  
+  <Expandable title="properties">
+    <ParamField path="date" type="integer" required>
+      Unix timestamp to validate against the restriction
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if the external date is before the specified date, `false` otherwise
+</ResponseField>
+
+### Method Signature
+
+```php
+public function before(array $internalData, array $externalData) : bool
+```
+
+### Internal Data Structure Example
+
+```php
+// Fixed date
+$internalData = [
+    'd' => '2024-12-31'
+];
+
+// Using wildcards - end of current month
+$internalData = [
+    'd' => '%Y-%M-31'
+];
+
+// Using wildcards - current date
+$internalData = [
+    'd' => '%Y-%M-%D'
+];
+```
+
+### External Data Structure Example
+
+```php
+$externalData = [
+    'date' => 1703980800  // Unix timestamp (e.g., 2023-12-31)
+];
+```
+
+### Validation Logic
+
+- Converts internal date string to Unix timestamp using `formatDate()`
+- Compares: `externalData['date'] < internalData['d']`
+- Returns `false` if external date is greater than or equal to internal date
+
+### Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByDate;
+
+// Restrict access before end of 2024
+$restrictions = [
+    'before' => [
+        ['d' => ['d' => '2024-12-31']]
+    ]
+];
+
+$byDate = new ByDate($restrictions);
+
+// Check if current timestamp is allowed
+$externalData = ['date' => time()];
+$isAllowed = $byDate->run($externalData);
+
+if (!$isAllowed) {
+    $error = $byDate->getError();
+    // Access denied - date is not before 2024-12-31
+}
+```
+
+---
+
+## after()
+
+Allow access after a specific date.
+
+<ParamField path="internalData" type="array" required>
+  Internal restriction data structure
+  
+  <Expandable title="properties">
+    <ParamField path="d" type="string" required>
+      Target date in `YYYY-MM-DD` format. Supports wildcards: `%Y` (current year), `%M` (current month), `%D` (current day)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="externalData" type="array" required>
+  External validation data
+  
+  <Expandable title="properties">
+    <ParamField path="date" type="integer" required>
+      Unix timestamp to validate against the restriction
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if the external date is after the specified date, `false` otherwise
+</ResponseField>
+
+### Method Signature
+
+```php
+public function after(array $internalData, array $externalData) : bool
+```
+
+### Internal Data Structure Example
+
+```php
+// Fixed date
+$internalData = [
+    'd' => '2024-01-01'
+];
+
+// Using wildcards - start of current year
+$internalData = [
+    'd' => '%Y-01-01'
+];
+```
+
+### External Data Structure Example
+
+```php
+$externalData = [
+    'date' => 1735689600  // Unix timestamp (e.g., 2025-01-01)
+];
+```
+
+### Validation Logic
+
+- Converts internal date string to Unix timestamp using `formatDate()`
+- Compares: `externalData['date'] > internalData['d']`
+- Returns `false` if external date is less than or equal to internal date
+
+### Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByDate;
+
+// Allow access only after launch date
+$restrictions = [
+    'after' => [
+        ['d' => ['d' => '2024-06-01']]
+    ]
+];
+
+$byDate = new ByDate($restrictions);
+
+// Check if current timestamp is allowed
+$externalData = ['date' => time()];
+$isAllowed = $byDate->run($externalData);
+
+if ($isAllowed) {
+    // Access granted - date is after 2024-06-01
+}
+```
+
+---
+
+## inRange()
+
+Allow access within a date range (inclusive).
+
+<ParamField path="internalData" type="array" required>
+  Internal restriction data structure
+  
+  <Expandable title="properties">
+    <ParamField path="sd" type="string" required>
+      Start date in `YYYY-MM-DD` format. Supports wildcards: `%Y`, `%M`, `%D`
+    </ParamField>
+    <ParamField path="ed" type="string" required>
+      End date in `YYYY-MM-DD` format. Supports wildcards: `%Y`, `%M`, `%D`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="externalData" type="array" required>
+  External validation data
+  
+  <Expandable title="properties">
+    <ParamField path="date" type="integer" required>
+      Unix timestamp to validate against the restriction
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if the external date falls within the range (inclusive), `false` otherwise
+</ResponseField>
+
+### Method Signature
+
+```php
+public function inRange(array $internalData, array $externalData) : bool
+```
+
+### Internal Data Structure Example
+
+```php
+// Fixed date range
+$internalData = [
+    'sd' => '2024-06-01',  // Start date
+    'ed' => '2024-08-31'   // End date
+];
+
+// Current year's summer months
+$internalData = [
+    'sd' => '%Y-06-01',
+    'ed' => '%Y-08-31'
+];
+
+// This month only
+$internalData = [
+    'sd' => '%Y-%M-01',
+    'ed' => '%Y-%M-31'
+];
+```
+
+### External Data Structure Example
+
+```php
+$externalData = [
+    'date' => 1719878400  // Unix timestamp (e.g., 2024-07-02)
+];
+```
+
+### Validation Logic
+
+- Converts both start and end dates to Unix timestamps
+- Compares: `externalData['date'] >= internalData['sd'] && externalData['date'] <= internalData['ed']`
+- Returns `false` if date is outside the range
+
+### Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByDate;
+
+// Allow access only during summer promotion period
+$restrictions = [
+    'in_range' => [
+        ['d' => [
+            'sd' => '2024-06-01',
+            'ed' => '2024-08-31'
+        ]]
+    ]
+];
+
+$byDate = new ByDate($restrictions);
+
+// Check if July 15, 2024 is allowed
+$externalData = ['date' => strtotime('2024-07-15')];
+$isAllowed = $byDate->run($externalData);
+
+if ($isAllowed) {
+    // Access granted - date is within summer period
+}
+```
+
+---
+
+## outRange()
+
+Allow access outside a date range (exclusive).
+
+<ParamField path="internalData" type="array" required>
+  Internal restriction data structure
+  
+  <Expandable title="properties">
+    <ParamField path="sd" type="string" required>
+      Start date of excluded range in `YYYY-MM-DD` format. Supports wildcards: `%Y`, `%M`, `%D`
+    </ParamField>
+    <ParamField path="ed" type="string" required>
+      End date of excluded range in `YYYY-MM-DD` format. Supports wildcards: `%Y`, `%M`, `%D`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="externalData" type="array" required>
+  External validation data
+  
+  <Expandable title="properties">
+    <ParamField path="date" type="integer" required>
+      Unix timestamp to validate against the restriction
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  Returns `true` if the external date falls outside the range, `false` if within the range
+</ResponseField>
+
+### Method Signature
+
+```php
+public function outRange(array $internalData, array $externalData) : bool
+```
+
+### Internal Data Structure Example
+
+```php
+// Block access during maintenance window
+$internalData = [
+    'sd' => '2024-12-24',  // Start of blocked period
+    'ed' => '2024-12-26'   // End of blocked period
+];
+
+// Block access during holiday season each year
+$internalData = [
+    'sd' => '%Y-12-20',
+    'ed' => '%Y-01-05'
+];
+```
+
+### External Data Structure Example
+
+```php
+$externalData = [
+    'date' => 1735084800  // Unix timestamp (e.g., 2024-12-25)
+];
+```
+
+### Validation Logic
+
+- Converts both start and end dates to Unix timestamps
+- Compares: NOT (`externalData['date'] >= internalData['sd'] && externalData['date'] <= internalData['ed']`)
+- Returns `false` if date is within the blocked range
+
+### Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByDate;
+
+// Block access during maintenance period
+$restrictions = [
+    'out_range' => [
+        ['d' => [
+            'sd' => '2024-12-24',
+            'ed' => '2024-12-26'
+        ]]
+    ]
+];
+
+$byDate = new ByDate($restrictions);
+
+// Check if December 25, 2024 is allowed
+$externalData = ['date' => strtotime('2024-12-25')];
+$isAllowed = $byDate->run($externalData);
+
+if (!$isAllowed) {
+    $error = $byDate->getError();
+    // Access denied - date is within maintenance window
+}
+```
+
+---
+
+## Utility Methods
+
+### formatDate()
+
+Internal utility method to format dates with wildcard support.
+
+```php
+function formatDate(string $date, bool $toTime = true) : string|int
+```
+
+<ParamField path="date" type="string" required>
+  Date string with optional wildcards
+</ParamField>
+
+<ParamField path="toTime" type="bool" default="true">
+  Convert to Unix timestamp. If `false`, returns formatted date string
+</ParamField>
+
+#### Supported Wildcards
+
+- `%Y` - Current year (4 digits)
+- `%M` - Current month (2 digits)
+- `%D` - Current day (2 digits)
+
+#### Example
+
+```php
+// If current date is 2024-03-15
+$timestamp = $this->formatDate('%Y-%M-01');  // Returns timestamp for 2024-03-01
+$dateString = $this->formatDate('%Y-%M-01', false);  // Returns '2024-03-01'
+```
+
+---
+
+## Data Validation
+
+All methods validate data integrity before processing:
+
+### Internal Data Validation
+
+- `before()` and `after()`: Requires `d` key with string value
+- `inRange()` and `outRange()`: Requires `sd` and `ed` keys with string values
+
+### External Data Validation
+
+- All methods require `date` key with integer value (Unix timestamp)
+
+### Validation Failure
+
+If data validation fails, methods return `false` immediately without processing.
+
+---
+
+## Complete Usage Example
+
+```php
+use DancasDev\GAC\Restrictions\ByDate;
+
+// Complex date-based access control
+$restrictions = [
+    // Must be after launch date
+    'after' => [
+        ['d' => ['d' => '2024-01-01']]
+    ],
+    // Must be within active season
+    'in_range' => [
+        ['d' => [
+            'sd' => '%Y-03-01',
+            'ed' => '%Y-11-30'
+        ]]
+    ],
+    // Must be outside maintenance windows
+    'out_range' => [
+        ['d' => [
+            'sd' => '%Y-12-24',
+            'ed' => '%Y-12-26'
+        ]]
+    ]
+];
+
+$byDate = new ByDate($restrictions);
+
+// Validate current access
+$externalData = ['date' => time()];
+$isAllowed = $byDate->run($externalData);
+
+if (!$isAllowed) {
+    $error = $byDate->getError();
+    // Handle access denial
+    // $error['method'] contains the failed restriction method
+    // $error['restriction'] contains the restriction data that failed
+}
+```
+
+## Related
+
+- [ByEntity](/api/restrictions/by-entity) - Entity-based restrictions
+- [Restrictions](/api/restrictions/overview) - Base restriction system

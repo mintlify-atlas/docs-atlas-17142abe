@@ -1,0 +1,453 @@
+---
+title: "CacheAdapter"
+description: "File-based caching adapter for GAC access control data"
+---
+
+## Overview
+
+The `CacheAdapter` class provides a simple file-based caching mechanism for the GAC (Gestión de Acceso y Control) system. It implements the `CacheAdapterInterface` and stores cached data as JSON files with optional TTL (time-to-live) support.
+
+## Class Reference
+
+### CacheAdapter
+
+**Namespace:** `DancasDev\GAC\Adapters`
+
+**Implements:** `CacheAdapterInterface`
+
+## Constructor
+
+```php
+public function __construct(string $cacheDir = null)
+```
+
+Initializes the cache adapter with an optional cache directory.
+
+<ParamField path="cacheDir" type="string" default="null">
+  Path to the cache storage directory. If provided, the directory will be created if it doesn't exist.
+</ParamField>
+
+**Example:**
+
+```php
+// Initialize with cache directory
+$adapter = new CacheAdapter('/path/to/cache');
+
+// Initialize without directory (set later)
+$adapter = new CacheAdapter();
+$adapter->setDir('/path/to/cache');
+```
+
+## Methods
+
+### setDir
+
+```php
+public function setDir(string $cacheDir): bool
+```
+
+Sets the cache storage directory. Creates the directory if it doesn't exist.
+
+<ParamField path="cacheDir" type="string" required>
+  Path to the cache storage directory. Directory separators are normalized automatically.
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="bool" type="bool">
+  `true` on success, throws exception on failure
+</ResponseField>
+
+**Throws:**
+- `CacheAdapterException` - If the cache directory cannot be created
+
+**Example:**
+
+```php
+try {
+    $adapter->setDir('/var/cache/gac');
+    echo "Cache directory set successfully";
+} catch (CacheAdapterException $e) {
+    error_log('Failed to set cache directory: ' . $e->getMessage());
+}
+```
+
+### get
+
+```php
+public function get(string $key): mixed
+```
+
+Retrieves a value from the cache.
+
+<ParamField path="key" type="string" required>
+  Cache key identifier
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="mixed" type="mixed">
+  Cached value, or `null` if:
+  - Cache directory is not set
+  - Key doesn't exist
+  - Cache entry has expired
+  - Data cannot be decoded
+</ResponseField>
+
+**Behavior:**
+- Automatically deletes expired entries
+- Returns `null` for non-existent or expired keys
+- Handles JSON decode errors gracefully
+
+**Example:**
+
+```php
+$roles = $adapter->get('user_123_roles');
+if ($roles === null) {
+    // Cache miss - fetch from database
+    $roles = $database->getRoles('1', 123);
+    $adapter->save('user_123_roles', $roles, 3600);
+}
+```
+
+### save
+
+```php
+public function save(string $key, mixed $data, int|null $ttl = 60): bool
+```
+
+Stores a value in the cache with optional TTL.
+
+<ParamField path="key" type="string" required>
+  Cache key identifier
+</ParamField>
+
+<ParamField path="data" type="mixed" required>
+  Data to cache. Must be JSON-serializable.
+</ParamField>
+
+<ParamField path="ttl" type="int|null" default="60">
+  Time-to-live in seconds. Use `null` for permanent cache (no expiration).
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="bool" type="bool">
+  `true` on success, `false` on failure
+</ResponseField>
+
+**Returns false if:**
+- Cache directory is not set
+- Data cannot be JSON encoded
+- File write operation fails
+
+**Example:**
+
+```php
+// Cache for 1 hour
+$adapter->save('user_123_roles', $roles, 3600);
+
+// Cache for default 60 seconds
+$adapter->save('temp_data', $data);
+
+// Cache permanently (no expiration)
+$adapter->save('static_config', $config, null);
+```
+
+### delete
+
+```php
+public function delete(string $key): bool
+```
+
+Deletes a specific cache entry.
+
+<ParamField path="key" type="string" required>
+  Cache key identifier to delete
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="bool" type="bool">
+  `true` if file was deleted, `false` if:
+  - Cache directory is not set
+  - Key doesn't exist
+  - Delete operation fails
+</ResponseField>
+
+**Example:**
+
+```php
+if ($adapter->delete('user_123_roles')) {
+    echo "Cache entry deleted";
+} else {
+    echo "Cache entry not found or delete failed";
+}
+```
+
+### deleteMatching
+
+```php
+public function deleteMatching(string $pattern): int
+```
+
+Deletes all cache entries matching a glob pattern.
+
+<ParamField path="pattern" type="string" required>
+  Glob-style pattern to match cache keys. Supports wildcards:
+  - `*` matches any characters
+  - `?` matches a single character
+  - `[abc]` matches any character in the set
+</ParamField>
+
+**Returns:**
+
+<ResponseField name="int" type="int">
+  Number of cache entries deleted. Returns `0` if:
+  - Cache directory is not set
+  - Pattern is empty
+  - No matching files found
+</ResponseField>
+
+**Example:**
+
+```php
+// Delete all user role caches
+$count = $adapter->deleteMatching('user_*_roles');
+echo "Deleted {$count} cache entries";
+
+// Delete all caches for user 123
+$adapter->deleteMatching('user_123_*');
+
+// Delete all permission caches
+$adapter->deleteMatching('*_permissions');
+```
+
+### clean
+
+```php
+public function clean(): bool
+```
+
+Deletes all cache entries in the cache directory.
+
+**Returns:**
+
+<ResponseField name="bool" type="bool">
+  `true` on success, `false` if cache directory is not set
+</ResponseField>
+
+**Warning:** This operation removes all cached data and cannot be undone.
+
+**Example:**
+
+```php
+// Clear all cache
+if ($adapter->clean()) {
+    echo "All cache entries cleared";
+}
+```
+
+## CacheAdapterInterface
+
+The `CacheAdapterInterface` defines the contract that all cache adapters must implement for GAC.
+
+### Interface Methods
+
+```php
+interface CacheAdapterInterface {
+    public function get(string $key): mixed;
+    public function save(string $key, mixed $data, ?int $ttl = 60): bool;
+    public function delete(string $key): bool;
+    public function deleteMatching(string $pattern): int;
+    public function clean(): bool;
+}
+```
+
+Note: The `setDir()` method is specific to the file-based implementation and not part of the interface.
+
+## Creating a Custom Cache Adapter
+
+You can create a custom cache adapter by implementing the `CacheAdapterInterface`. This is useful for integrating with Redis, Memcached, or other caching systems:
+
+```php
+use DancasDev\GAC\Adapters\CacheAdapterInterface;
+
+class RedisCacheAdapter implements CacheAdapterInterface {
+    private $redis;
+    
+    public function __construct($redisConnection) {
+        $this->redis = $redisConnection;
+    }
+    
+    public function get(string $key): mixed {
+        $data = $this->redis->get($key);
+        return $data ? json_decode($data, true) : null;
+    }
+    
+    public function save(string $key, mixed $data, ?int $ttl = 60): bool {
+        $encoded = json_encode($data);
+        if ($ttl === null) {
+            return $this->redis->set($key, $encoded);
+        }
+        return $this->redis->setex($key, $ttl, $encoded);
+    }
+    
+    public function delete(string $key): bool {
+        return $this->redis->del($key) > 0;
+    }
+    
+    public function deleteMatching(string $pattern): int {
+        $keys = $this->redis->keys($pattern);
+        if (empty($keys)) {
+            return 0;
+        }
+        return $this->redis->del(...$keys);
+    }
+    
+    public function clean(): bool {
+        return $this->redis->flushDB();
+    }
+}
+
+// Use with GAC
+$redis = new Redis();
+$redis->connect('127.0.0.1', 6379);
+$cacheAdapter = new RedisCacheAdapter($redis);
+
+$gac = new GAC($databaseAdapter, $cacheAdapter);
+```
+
+## Cache Storage Format
+
+The file-based cache adapter stores data as JSON files with the following structure:
+
+```json
+{
+  "t": 1709558400,
+  "v": {"cached": "data"}
+}
+```
+
+- `t` - Expiration timestamp (Unix timestamp), or `null` for permanent cache
+- `v` - Cached value (any JSON-serializable data)
+
+## Best Practices
+
+### Cache Key Naming
+
+Use a consistent naming convention for cache keys:
+
+```php
+// Good: Structured key names
+$adapter->save('user_' . $userId . '_roles', $roles);
+$adapter->save('user_' . $userId . '_permissions', $permissions);
+$adapter->save('module_' . $moduleId . '_data', $data);
+
+// Allows easy pattern-based deletion
+$adapter->deleteMatching('user_' . $userId . '_*');
+```
+
+### TTL Strategy
+
+Choose appropriate TTL values based on data volatility:
+
+```php
+// Frequently changing data: short TTL
+$adapter->save('active_sessions', $sessions, 300); // 5 minutes
+
+// Moderately stable data: medium TTL
+$adapter->save('user_permissions', $permissions, 3600); // 1 hour
+
+// Rarely changing data: long TTL
+$adapter->save('module_config', $config, 86400); // 24 hours
+
+// Static data: permanent cache
+$adapter->save('system_settings', $settings, null);
+```
+
+### Cache Invalidation
+
+Invalidate cache when data changes:
+
+```php
+class UserRoleManager {
+    private $db;
+    private $cache;
+    
+    public function assignRole($userId, $roleId) {
+        // Update database
+        $this->db->assignRole($userId, $roleId);
+        
+        // Invalidate affected caches
+        $this->cache->delete('user_' . $userId . '_roles');
+        $this->cache->delete('user_' . $userId . '_permissions');
+    }
+    
+    public function removeRole($userId, $roleId) {
+        $this->db->removeRole($userId, $roleId);
+        
+        // Clear all caches for this user
+        $this->cache->deleteMatching('user_' . $userId . '_*');
+    }
+}
+```
+
+### Error Handling
+
+Handle cache failures gracefully:
+
+```php
+try {
+    $adapter = new CacheAdapter('/var/cache/gac');
+    
+    // Cache operations should not break your application
+    $data = $adapter->get('key');
+    if ($data === null) {
+        $data = $database->fetchData();
+        $adapter->save('key', $data, 3600);
+    }
+    
+} catch (CacheAdapterException $e) {
+    // Log error but continue without cache
+    error_log('Cache error: ' . $e->getMessage());
+    $data = $database->fetchData();
+}
+```
+
+## Performance Considerations
+
+### File System Performance
+
+The file-based cache adapter performance depends on:
+
+- **File system type**: SSD is much faster than HDD
+- **Number of files**: Performance degrades with many files in one directory
+- **File size**: Smaller cached values perform better
+
+### When to Use File-Based Cache
+
+Good for:
+- Small to medium applications
+- Shared hosting environments
+- Development environments
+- Simple deployment requirements
+
+Consider alternatives (Redis, Memcached) for:
+- High-traffic applications
+- Distributed systems
+- Large cache sizes (>10,000 keys)
+- Sub-millisecond latency requirements
+
+## Directory Permissions
+
+Ensure proper permissions for the cache directory:
+
+```bash
+# Create cache directory with appropriate permissions
+mkdir -p /var/cache/gac
+chmod 775 /var/cache/gac
+chown www-data:www-data /var/cache/gac
+```
+
+The cache adapter creates directories with `0775` permissions by default.

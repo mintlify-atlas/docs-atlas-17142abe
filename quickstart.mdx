@@ -1,80 +1,427 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with GAC in minutes - from installation to your first permission check
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
+This guide walks you through setting up GAC and performing your first permission check. You'll learn how to configure the database connection, set up an entity, retrieve permissions, and validate access.
 
-### Step 1: Set up your local environment
+<Note>
+  This guide assumes you've already installed GAC and imported the database schema. If not, check the [installation guide](/installation) first.
+</Note>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Step 1: Initialize GAC
+
+Create a GAC instance and configure the database connection.
+
+<CodeGroup>
+```php PDO instance
+<?php
+
+require_once 'vendor/autoload.php';
+
+use DancasDev\GAC\GAC;
+use PDO;
+
+// Create PDO connection
+$pdo = new PDO(
+    'mysql:host=localhost;dbname=your_database',
+    'username',
+    'password'
+);
+
+// Initialize GAC with PDO
+$gac = new GAC();
+$gac->setDatabase($pdo);
+```
+
+```php Connection array
+<?php
+
+require_once 'vendor/autoload.php';
+
+use DancasDev\GAC\GAC;
+
+// Initialize GAC with connection array
+$gac = new GAC();
+$gac->setDatabase([
+    'host' => 'localhost',
+    'database' => 'your_database',
+    'username' => 'username',
+    'password' => 'password'
+]);
+```
+
+```php Custom adapter
+<?php
+
+require_once 'vendor/autoload.php';
+
+use DancasDev\GAC\GAC;
+use DancasDev\GAC\Adapters\DatabaseAdapterInterface;
+
+// Implement your custom adapter
+class MyDatabaseAdapter implements DatabaseAdapterInterface {
+    public function getRoles(string $entityType, string|int $entityId): array {
+        // Your implementation
+    }
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    public function getPermissions(string $entityType, string|int $entityId, array $roleIds = []): array {
+        // Your implementation
+    }
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    // ... implement other required methods
+}
 
-### Step 2: Deploy your changes
+// Initialize GAC with custom adapter
+$gac = new GAC();
+$gac->setDatabase(new MyDatabaseAdapter());
+```
+</CodeGroup>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+<Warning>
+  The database connection array requires all four keys: `host`, `database`, `username`, and `password`. Missing any will throw a `DatabaseAdapterException`.
+</Warning>
+
+## Step 2: Configure caching (optional)
+
+Enable caching to improve performance by reducing database queries.
+
+<CodeGroup>
+```php File-based cache
+// Set up file-based caching
+$gac->setCache(
+    key: 'myapp_gac',           // Cache key prefix
+    ttl: 1800,                  // TTL in seconds (30 minutes)
+    dir: '/path/to/cache/dir'   // Cache directory
+);
+```
+
+```php Default cache directory
+// Use default cache directory (src/writable/)
+$gac->setCache('myapp_gac', 1800);
+```
+
+```php Custom cache adapter
+use DancasDev\GAC\Adapters\CacheAdapterInterface;
+
+class RedisCacheAdapter implements CacheAdapterInterface {
+    public function get(string $key): mixed {
+        // Redis get implementation
+    }
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    public function save(string $key, mixed $data, int $ttl): bool {
+        // Redis save implementation
+    }
+    
+    public function delete(string $key): bool {
+        // Redis delete implementation
+    }
+    
+    public function deleteMatching(string $pattern): bool {
+        // Redis pattern delete implementation
+    }
+}
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+$gac->setCache('myapp_gac', 1800, new RedisCacheAdapter());
+```
+</CodeGroup>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+<Info>
+  Caching is optional but recommended for production. The default TTL is 30 minutes (1800 seconds).
+</Info>
 
-### Step 3: Go live
+## Step 3: Set the entity
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+Specify which user or client you want to check permissions for.
+
+```php
+// Set entity for a user
+$gac->setEntity('user', $userId);
+
+// Or set entity for a client
+$gac->setEntity('client', $clientId);
+
+// You can also use numeric entity types directly
+$gac->setEntity('1', $userId);    // '1' = user
+$gac->setEntity('2', $clientId);  // '2' = client
+```
+
+The `setEntity()` method returns the GAC instance, allowing method chaining:
+
+```php
+$permissions = $gac->setEntity('user', $userId)
+                   ->getPermissions();
+```
+
+<Tip>
+  Entity types are mapped internally: 'user' → '1' and 'client' → '2'. You can use either format.
+</Tip>
+
+## Step 4: Retrieve permissions
+
+Get the permissions for the specified entity.
+
+```php
+// Get permissions (from cache if available)
+$permissions = $gac->getPermissions();
+
+// Get permissions directly from database (bypass cache)
+$permissions = $gac->getPermissions(fromCache: false);
+```
+
+The `getPermissions()` method returns a `Permissions` object containing all modules the entity can access.
+
+## Step 5: Check permissions
+
+Use the `Permissions` object to verify access to modules and features.
+
+<CodeGroup>
+```php Basic access check
+// Check if user has access to a module
+if ($permissions->has('users')) {
+    echo "User has access to the users module";
+}
+```
+
+```php Feature-based check
+// Get permission details and check features
+$permission = $permissions->get('users');
+
+if ($permission && $permission->hasFeature('create')) {
+    // User can create new users
+    createUser($data);
+}
+
+if ($permission && $permission->hasFeature(['read', 'update'])) {
+    // User can read AND update users
+    editUser($userId, $data);
+}
+```
+
+```php Check permission level
+$permission = $permissions->get('users');
+
+if ($permission) {
+    $level = $permission->getLevel();
+    // 0 = Low, 1 = Normal, 2 = High
+    
+    if ($level >= 2) {
+        // High-level access
+        performSensitiveOperation();
+    }
+}
+```
+
+```php Development mode check
+$permission = $permissions->get('new_feature');
+
+if ($permission && $permission->moduleIsDeveloping()) {
+    // Module is in development
+    if ($permission->hasFeature('dev')) {
+        // User has dev feature access
+        showDevelopmentFeature();
+    }
+}
+```
+</CodeGroup>
+
+### Available features
+
+GAC supports these built-in features:
+
+- `create` / `'0'` - Create new records
+- `read` / `'1'` - Read/view records
+- `update` / `'2'` - Update existing records
+- `delete` / `'3'` - Delete records
+- `trash` / `'4'` - Access trash/recycle bin (combined with read, update, or delete)
+- `dev` / `'5'` - Access development/beta features
+
+<Note>
+  You can use either the string name (e.g., 'create') or numeric code (e.g., '0') when checking features.
+</Note>
+
+## Step 6: Apply restrictions
+
+Retrieve and validate restrictions to enforce additional access rules.
+
+```php
+// Get restrictions for the entity
+$restrictions = $gac->getRestrictions();
+
+// Check if entity has date-based restrictions
+if ($restrictions->has('by_date')) {
+    $dateRestriction = $restrictions->get('by_date');
+    
+    // Validate current date against restrictions
+    $allowed = $dateRestriction->run([
+        'date' => time()
+    ]);
+    
+    if (!$allowed) {
+        $error = $dateRestriction->getError();
+        die('Access denied: Outside allowed time window');
+    }
+}
+
+// Check entity-based restrictions (e.g., branch access)
+if ($restrictions->has('by_branch')) {
+    $branchRestriction = $restrictions->get('by_branch');
+    
+    $allowed = $branchRestriction->run([
+        'entity' => $currentBranchId
+    ]);
+    
+    if (!$allowed) {
+        die('Access denied: Branch not allowed');
+    }
+}
+```
+
+<Info>
+  Restrictions are optional. If no restrictions are configured for an entity, the `has()` method returns `false`.
+</Info>
+
+## Complete example
+
+Here's a complete example combining all steps:
+
+```php
+<?php
+
+require_once 'vendor/autoload.php';
+
+use DancasDev\GAC\GAC;
+use PDO;
+
+// 1. Initialize GAC
+$pdo = new PDO('mysql:host=localhost;dbname=your_database', 'username', 'password');
+$gac = new GAC();
+$gac->setDatabase($pdo)
+    ->setCache('myapp_gac', 1800);
+
+// 2. Set entity (e.g., from session)
+$userId = $_SESSION['user_id'];
+$gac->setEntity('user', $userId);
+
+// 3. Get permissions
+$permissions = $gac->getPermissions();
+
+// 4. Check access to users module
+if (!$permissions->has('users')) {
+    http_response_code(403);
+    die('Access denied: You do not have access to the users module');
+}
+
+// 5. Verify create permission
+$permission = $permissions->get('users');
+if (!$permission->hasFeature('create')) {
+    http_response_code(403);
+    die('Access denied: You cannot create users');
+}
+
+// 6. Check restrictions
+$restrictions = $gac->getRestrictions();
+if ($restrictions->has('by_date')) {
+    $dateRestriction = $restrictions->get('by_date');
+    if (!$dateRestriction->run(['date' => time()])) {
+        http_response_code(403);
+        die('Access denied: Outside allowed time window');
+    }
+}
+
+// 7. All checks passed - proceed with operation
+echo "Access granted: You can create users";
+createNewUser($_POST);
+```
+
+## Cache management
+
+GAC provides methods to manage the permission cache:
+
+```php
+// Clear cache for current entity
+$gac->setEntity('user', $userId)
+    ->clearCache();
+
+// Clear cache including global restrictions
+$gac->clearCache(includeGlobal: true);
+
+// Purge permissions cache for specific entities
+$gac->purgePermissionsBy('user', [$userId1, $userId2]);
+$gac->purgePermissionsBy('role', [$roleId]);
+$gac->purgePermissionsBy('global', []);
+
+// Purge restrictions cache
+$gac->purgeRestrictionsBy('user', [$userId]);
+```
+
+<Tip>
+  Clear the cache when permissions or restrictions change (e.g., after assigning a new role or updating module access).
+</Tip>
+
+## Common patterns
+
+### Middleware for route protection
+
+```php
+function checkPermission(string $module, array $features = []) {
+    global $gac;
+    
+    $permissions = $gac->getPermissions();
+    $permission = $permissions->get($module);
+    
+    if (!$permission) {
+        http_response_code(403);
+        die('Access denied');
+    }
+    
+    if (!empty($features) && !$permission->hasFeature($features)) {
+        http_response_code(403);
+        die('Insufficient permissions');
+    }
+}
+
+// Usage in routes
+checkPermission('users', ['read']);
+showUsers();
+```
+
+### API endpoint protection
+
+```php
+// POST /api/users - Create user
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $gac->setEntity('client', $apiClientId);
+    $permissions = $gac->getPermissions();
+    $permission = $permissions->get('users');
+    
+    if (!$permission || !$permission->hasFeature('create')) {
+        echo json_encode(['error' => 'Forbidden']);
+        http_response_code(403);
+        exit;
+    }
+    
+    // Process request
+}
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
+You now know the basics of GAC! Explore these topics to learn more:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Permissions" icon="key" href="/concepts/permissions">
+    Deep dive into permission management and granularity
+  </Card>
+  <Card title="Restrictions" icon="ban" href="/concepts/restrictions">
+    Learn about date-based and custom restrictions
+  </Card>
+  <Card title="Adapters" icon="puzzle-piece" href="/guides/custom-adapters">
+    Implement custom database and cache adapters
+  </Card>
+  <Card title="API reference" icon="code" href="/api/gac">
+    Complete API documentation for all classes
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
