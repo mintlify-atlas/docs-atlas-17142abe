@@ -1,0 +1,98 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "GAC (Granular Access Control)",
+  "projectDescription": "A flexible PHP library for managing granular access control with role-based permissions and restrictions in backend applications.",
+  "theme": "linden",
+  "primaryColor": "#3B82F6",
+  "lightColor": "#60A5FA",
+  "darkColor": "#1E40AF",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/permissions",
+              "concepts/restrictions",
+              "concepts/roles-entities",
+              "concepts/caching"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/setup-database",
+              "guides/setup-adapters",
+              "guides/checking-permissions",
+              "guides/managing-restrictions",
+              "guides/cache-management",
+              "guides/custom-adapters"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Classes",
+            "pages": [
+              "api/gac",
+              "api/permissions",
+              "api/permission",
+              "api/restrictions",
+              "api/restriction"
+            ]
+          },
+          {
+            "group": "Adapters",
+            "pages": [
+              "api/database-adapter",
+              "api/cache-adapter"
+            ]
+          },
+          {
+            "group": "Restriction Types",
+            "pages": [
+              "api/restrictions/by-date",
+              "api/restrictions/by-entity"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Role-based access control with granular permissions",
+    "Module and category-level permissions",
+    "Flexible restriction system (by date, by entity)",
+    "Built-in caching with custom adapter support",
+    "Support for users and clients (API tokens)",
+    "Permission inheritance with priority management",
+    "CRUD feature-level access control",
+    "Custom database and cache adapters"
+  ],
+  "publicApiSurface": [
+    "DancasDev\\GAC\\GAC",
+    "DancasDev\\GAC\\Permissions\\Permissions",
+    "DancasDev\\GAC\\Permissions\\Permission",
+    "DancasDev\\GAC\\Restrictions\\Restrictions",
+    "DancasDev\\GAC\\Restrictions\\Restriction",
+    "DancasDev\\GAC\\Restrictions\\ByDate",
+    "DancasDev\\GAC\\Restrictions\\ByEntity",
+    "DancasDev\\GAC\\Adapters\\DatabaseAdapter",
+    "DancasDev\\GAC\\Adapters\\DatabaseAdapterInterface",
+    "DancasDev\\GAC\\Adapters\\CacheAdapter",
+    "DancasDev\\GAC\\Adapters\\CacheAdapterInterface"
+  ]
+}
